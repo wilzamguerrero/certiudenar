@@ -338,6 +338,108 @@
         "autoFit": true
       },
       "bgImage": "https://prod-files-secure.s3.us-west-2.amazonaws.com/e8643424-2525-81c3-b6e9-000364e7d780/6269a953-e682-4215-bbb9-3f171714a8fb/background.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZI2LB466XWO6GE2C%2F20260609%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20260609T113447Z&X-Amz-Expires=3600&X-Amz-Security-Token=IQoJb3JpZ2luX2VjEAMaCXVzLXdlc3QtMiJGMEQCICwiyF25c%2FTmIqjTNNnOEBmjsL%2FqQ3G%2F5Gb5WjINFxaEAiAohr2pbp9UOno%2Frq%2BU1fyUdmYG7woHxDqbOAQgzuli0CqIBAjM%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F8BEAAaDDYzNzQyMzE4MzgwNSIMrYVsCc5O%2Bm8mcRYGKtwD2xzwqYSFYWrxtclMq0F4YasnKNxchwOKuEnBjhrHKGrJqIam%2Bu2oEvIx5ycErdVAz%2FfQWSp3qMhXuD0hNv%2BzB45F%2BumMuao4ubAcU3XT4bKaC9WhVQSYL13GNlK%2Fv5a5WQNfqzue6gf1JXCbUAD8ahssGpDBA0aEykwSHbIhPoDAUNiAaiIvqEu1iHIuDWZzxj5cMZCy3j4uyJMdbc0jkCpvBZTrXT1FEu%2B8caNcS0i6GIHKiWUek1ZbA4ojDOcSkEvcjlIuI2sjcSL%2FAN9f5bNbMpNOCf%2BtLXt2xBIO4qFqZbsQvAdJ9fbuDwNhlGznKIy3Vw3J44IW4olEnnBrU6HgT%2Ft3eGGApiHQ5Pqqb%2BBCRKxKPh7lWVa63XuHBW7Qm6XM4pZCigdfIDZXTDpr8uSGnWlb0gtFof58MAbE5%2BPl3ukvEEROZXH2gSagF%2BkyzFk9Fg%2FOw%2FoLttcJXZvxoKI1K1jxArWtxGeBx8p%2B0416ZkWkvpNvOt6NhwrF50p0IROGdWcrA974NRvpLRptiNRp2bP2UF%2Bg%2F9%2FFVlNd%2BjEauIfiJADkG%2B9QOATiTOxVyLkWcHmg7ESJXFW%2BNcaEQ%2BSeOXifKZQK7XLfzivha4DLHMq%2BE%2BM7UgUgk2UwyOGf0QY6pgFwiFil61YlMnqTsMP8FAY0KmTjCAi8mEiToSJLKWkkiaNKetJiKYf69ZZpT%2FJ7HQrVrr3UvbwxQIAJStWk1k5CK%2BEa0T4HKp9T0zWl8rVahm9zPXMpO18wNCQ1blRDqNdX6009L6aJoEON62okLnHQ4PjzqYXCblgVxt3mocWDK%2FxqMJvHfTn01ta6HzcSawZ4iNtgCFp4F%2B6PFmMb5TePcVj71Dry&X-Amz-Signature=2c2c3faec4590040b97e76d0383dedca2338bc8ce0d9c90897b413892cc0d933&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+    },
+    "37a43424-2525-812f-b7b1-c642696ecb61": {
+      "bgAspectRatio": 1.7916666666666667,
+      "bgImageBlockId": "37a43424-2525-81ba-b414-ffa40c65cb6f",
+      "fields": [
+        {
+          "id": "nameField",
+          "label": "Nombre",
+          "dataKey": "name",
+          "x": 22.5,
+          "y": 61.9,
+          "width": 40,
+          "height": 8,
+          "fontSize": 32,
+          "color": "#1e1b4b",
+          "fontWeight": "bold",
+          "enabled": true,
+          "align": "center",
+          "autoFit": true
+        },
+        {
+          "id": "idField",
+          "label": "Cédula",
+          "dataKey": "identification",
+          "x": 23.1,
+          "y": 68.4,
+          "width": 30,
+          "height": 6,
+          "fontSize": 18,
+          "color": "#1f2937",
+          "fontWeight": "normal",
+          "enabled": true,
+          "align": "center",
+          "autoFit": true
+        },
+        {
+          "id": "roleField",
+          "label": "Rol/Cargo",
+          "dataKey": "role",
+          "x": 22.5,
+          "y": 73.3,
+          "width": 25,
+          "height": 5,
+          "fontSize": 15,
+          "color": "#4b5563",
+          "fontWeight": "bold",
+          "enabled": true,
+          "align": "center",
+          "autoFit": true
+        }
+      ],
+      "roles": [
+        "estudiante",
+        "egresado",
+        "empresario"
+      ],
+      "nameField": {
+        "id": "nameField",
+        "label": "Nombre",
+        "dataKey": "name",
+        "x": 22.5,
+        "y": 61.9,
+        "width": 40,
+        "height": 8,
+        "fontSize": 32,
+        "color": "#1e1b4b",
+        "fontWeight": "bold",
+        "enabled": true,
+        "align": "center",
+        "autoFit": true
+      },
+      "idField": {
+        "id": "idField",
+        "label": "Cédula",
+        "dataKey": "identification",
+        "x": 23.1,
+        "y": 68.4,
+        "width": 30,
+        "height": 6,
+        "fontSize": 18,
+        "color": "#1f2937",
+        "fontWeight": "normal",
+        "enabled": true,
+        "align": "center",
+        "autoFit": true
+      },
+      "roleField": {
+        "id": "roleField",
+        "label": "Rol/Cargo",
+        "dataKey": "role",
+        "x": 22.5,
+        "y": 73.3,
+        "width": 25,
+        "height": 5,
+        "fontSize": 15,
+        "color": "#4b5563",
+        "fontWeight": "bold",
+        "enabled": true,
+        "align": "center",
+        "autoFit": true
+      },
+      "bgImage": "https://prod-files-secure.s3.us-west-2.amazonaws.com/e8643424-2525-81c3-b6e9-000364e7d780/6298e777-3e71-4a71-b51b-1ba192b13405/background.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZI2LB466QITE2EWQ%2F20260609%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20260609T115226Z&X-Amz-Expires=3600&X-Amz-Security-Token=IQoJb3JpZ2luX2VjEAMaCXVzLXdlc3QtMiJHMEUCIDnDL9q3m8xGcHE1d0z7zQ2faXkfr6j2fzSyCVlgoawEAiEA%2BBfc6RTc1sHFBYgauQT1zyW8qffhYRNiwwwMH93xzM4qiAQIzP%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2Mzc0MjMxODM4MDUiDGdOGiIAyVaPmiy6ACrcA%2BiWI9eVi%2BpP7zBddxZXlnJP14Zqis6bAgVlIA2gbZV4LVbuXYLqvPojgbjnwBgwdh2AqS9SPVzNcmpmPQSmq8Q7T%2BSyTzA5OKDLfKe5CrdQ4MWxTbFryf6SyvDgZUGBV1nHrQlnPYTc%2FV4bUKjo8Y74kvPxEuMfM%2ByWe36e3%2Fl7DVcdwzPQ6kRbCbuWPCPh4gcIiShO9jEbiwFxaqr6PO1ZOYO2U8ToH7q%2B4HWqkXaEzlMNSvgbneCilAcffdd7pOdNbEtQkPZGvKmGqhJvbaXrYXVMI1jH90hLR5wv%2BC2kKko0jubMOXWB8AuUVgoI3pigXkjljrHx4h9v%2FW1yJFKLVR9VwGY%2Fx2Ar98uBCwqzcWdJVWwQ710dYQaGLPH4VMPfddx7I4Q8NybBV8bF0nwwEhFSwZPGxW5DN2R785ocPL4yFz97cmAUuXxStzMpYFkMs2fLw22r8VDiEUpXqq%2FyKyGOAVR9Y%2FK%2BaKsR8LFLHBafrcOSSWQ2MD8Uc%2F7cJPwpTVTtF2hqXQIZ8zocFTIiN9tCgBO8fvG51PsEhPGT1ohn2C87fF7fzyN2PpzHKL38RL%2FiDlGsYWjmgLYih2FCpZLPPH6ISrsd8IaPw%2BFrcZx2eoj8kKMpA7beMM3hn9EGOqUBanVRmz%2BHFniVh5Ejm7ytN5%2BHlS0r%2FOnw9NTr2xZW4N4t7Jqoe1JjqvD1elCSW%2FRtQlH0fUI8MoMvQWGSt6TB9wuSJLnZ8DZatP1EsX6oSRUQMFz46%2BY2Tnte3dJxh%2FQUBd2SlzoSCrgJyS4nRyTyP%2F2mHI7naV9JxwrNZ1cME1vYQWmC9fK6N%2BDp2UTCrmRikzsv6tMp%2BVcpvw%2Bp5pz3%2Bz0CU108&X-Amz-Signature=912f497354154fa3ed26c8d9ff38418283ac681bfa8a6ba22d3eadf4cd5af78f&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
     }
   }
 }

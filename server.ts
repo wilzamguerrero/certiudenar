@@ -247,11 +247,16 @@ async function uploadBgImageToNotion(
     const newBlockId = (appendResp.results as any[])[0]?.id;
     if (!newBlockId) return null;
 
-    // Step 5: Retrieve the block to get the fresh signed URL
-    await new Promise(r => setTimeout(r, 400));
-    const blockDetail = await (notion.blocks.retrieve as any)({ block_id: newBlockId });
-    const imageUrl: string =
-      blockDetail?.image?.file?.url || blockDetail?.image?.external?.url || '';
+    // Step 5: Retrieve the block to get the fresh signed URL (retry up to 5× with backoff)
+    let imageUrl = '';
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await new Promise(r => setTimeout(r, 400 + attempt * 600));
+      try {
+        const blockDetail = await (notion.blocks.retrieve as any)({ block_id: newBlockId });
+        imageUrl = blockDetail?.image?.file?.url || blockDetail?.image?.external?.url || '';
+        if (imageUrl) break;
+      } catch { /* will retry */ }
+    }
 
     return { blockId: newBlockId, imageUrl };
   } catch (e: any) {
@@ -383,23 +388,64 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
       "Enlace Descarga": { files: {} }
     };
 
+    // 5. PRIMARY: Use pages.create with the toggle block ID as the parent page.
+    //    This creates a child_page block INSIDE the toggle, then we put the DB inside that page.
     try {
-      const db = await notion.databases.create({
-        parent: { type: 'page_id', page_id: toggleBlockId },
-        is_inline: true,
-        title: [{ type: 'text', text: { content: `Participantes - ${projectTitle}` } }],
-        properties: DB_PROPERTIES,
+      const subPage = await (notion.pages as any).create({
+        parent: { page_id: toggleBlockId },
+        properties: {
+          title: [{ type: 'text', text: { content: `Participantes - ${projectTitle}` } }]
+        }
       });
-      if (db.id) {
-        console.info(`Created inline database inside toggle: ${db.id}`);
+      const subPageId: string | undefined = (subPage as any).id;
+      if (subPageId) {
+        console.info(`Created sub-page inside toggle: ${subPageId}`);
+        const db = await notion.databases.create({
+          parent: { type: 'page_id', page_id: subPageId },
+          is_inline: true,
+          title: [{ type: 'text', text: { content: `Participantes - ${projectTitle}` } }],
+          properties: DB_PROPERTIES,
+        });
+        console.info(`Created database inside toggle sub-page: ${db.id}`);
         await ensureDbProperties(db.id);
         return db.id;
       }
-    } catch (inlineErr: any) {
-      console.warn('Inline database inside toggle failed, using parent page fallback:', inlineErr.message);
+    } catch (subPageErr: any) {
+      console.warn('Sub-page inside toggle failed:', subPageErr.message);
     }
 
-    // 6. Final fallback: create at parent page level + store __DB_ID__ reference inside toggle
+    // 6. SECONDARY: Raw fetch to bypass SDK validation — databases.create with toggle as page_id
+    try {
+      const rawResp = await fetch(`${NOTION_API_BASE_URL}/databases`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${NOTION_SECRET}`,
+          'Notion-Version': NOTION_API_VER,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          parent: { type: 'page_id', page_id: toggleBlockId },
+          is_inline: true,
+          title: [{ type: 'text', text: { content: `Participantes - ${projectTitle}` } }],
+          properties: DB_PROPERTIES,
+        }),
+      });
+      if (rawResp.ok) {
+        const data = (await rawResp.json()) as any;
+        if (data.id) {
+          console.info(`Raw API created database inside toggle: ${data.id}`);
+          await ensureDbProperties(data.id);
+          return data.id;
+        }
+      } else {
+        const errText = await rawResp.text();
+        console.warn('Raw API databases.create with toggle parent failed:', errText);
+      }
+    } catch (rawErr: any) {
+      console.warn('Raw API databases.create error:', rawErr.message);
+    }
+
+    // 7. Final fallback: create at parent page level + store __DB_ID__ reference inside toggle
     const db = await notion.databases.create({
       parent: { type: 'page_id', page_id: PARENT_PAGE_ID },
       is_inline: true,
@@ -649,6 +695,36 @@ async function startServer() {
 
       for (const proj of projects) {
         let config = projectsConfig[proj.id];
+
+        // If cached config has a stale bgImage (base64 data URL or empty URL) but has a
+        // bgImageBlockId, refresh the signed URL from Notion before serving.
+        if (config && config.bgImageBlockId) {
+          const isBase64 = typeof config.bgImage === 'string' && config.bgImage.startsWith('data:');
+          const isEmpty = !config.bgImage;
+          if (isBase64 || isEmpty) {
+            try {
+              const freshBlock = await (notion.blocks.retrieve as any)({ block_id: config.bgImageBlockId });
+              const freshUrl: string = freshBlock?.image?.file?.url || freshBlock?.image?.external?.url || '';
+              if (freshUrl) {
+                config = { ...config, bgImage: freshUrl };
+                projectsConfig[proj.id] = config;
+                hasUpdates = true;
+              } else if (isBase64) {
+                // Can't refresh — clear the stored base64 to avoid polluting the cache
+                config = { ...config, bgImage: null };
+                projectsConfig[proj.id] = config;
+                hasUpdates = true;
+              }
+            } catch { /* keep existing config */ }
+          }
+        } else if (config && typeof config.bgImage === 'string' && config.bgImage.startsWith('data:')) {
+          // Legacy: base64 stored in cache but no block ID — clear it so we reload from Notion
+          config = { ...config, bgImage: null };
+          projectsConfig[proj.id] = config;
+          hasUpdates = true;
+          config = null as any; // force reload from Notion below
+        }
+
         if (!config) {
           try {
             const listResponse = await notion.blocks.children.list({ block_id: proj.id });
@@ -681,6 +757,7 @@ async function startServer() {
             }
             if (!parsedBg) {
               parsedBg = readBgImageFromBlocks(blks);
+              // Legacy base64 from code blocks — keep it only as a last resort (no block ID to refresh from)
             }
 
             if (Object.keys(parsedLayout).length > 0 || parsedBg || projectDailyCode) {

@@ -299,8 +299,15 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     setSavingSettings(true);
     try {
       const activeProject = projects.find((p: any) => p.id === selectedProjectId);
+      // Never send a base64 data URL as bgImage — the server would re-upload it and the
+      // client would get a stale signed URL back. Instead send the cached Notion URL (if any)
+      // or null, and let the server retrieve the current one from its own cache.
+      const bgImageToSend =
+        settings.template.bgImage && !settings.template.bgImage.startsWith('data:')
+          ? settings.template.bgImage
+          : activeProject?.config?.bgImage ?? null;
       const configToSave = {
-        bgImage: settings.template.bgImage,
+        bgImage: bgImageToSend,
         bgImageBlockId: activeProject?.config?.bgImageBlockId || null,
         bgAspectRatio: settings.template.bgAspectRatio ?? (16 / 9),
         fields: projectFields,
@@ -318,7 +325,21 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
       const result = await res.json();
       if (result.success) {
         flash('Diseño guardado exitosamente.');
-        setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, config: configToSave } : p));
+        // Use the server-confirmed bgImage (Notion signed URL) if returned;
+        // otherwise keep whatever is already stored in the project config.
+        const confirmedBgImage = result.bgImage || bgImageToSend;
+        const confirmedBlockId = result.bgImageBlockId || activeProject?.config?.bgImageBlockId || null;
+        setProjects(prev => prev.map(p => p.id === selectedProjectId ? {
+          ...p,
+          config: {
+            ...configToSave,
+            bgImage: confirmedBgImage,
+            bgImageBlockId: confirmedBlockId,
+          }
+        } : p));
+        if (confirmedBgImage && confirmedBgImage !== settings.template.bgImage) {
+          setSettings((prev: any) => ({ ...prev, template: { ...prev.template, bgImage: confirmedBgImage } }));
+        }
       } else flash(result.message || 'Error al guardar.', true);
     } catch { flash('Error de red al guardar.', true); }
     finally { setSavingSettings(false); }
@@ -494,7 +515,10 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                   ...p,
                   config: {
                     ...(p.config || {}),
-                    bgImage: notionBgImage || optimizedDataUrl,
+                    // Only store a proper URL in the projects cache — never base64.
+                    // If the Notion URL isn't ready yet (empty string), store null so the
+                    // server's refresh logic will fetch a fresh URL on the next load.
+                    bgImage: (notionBgImage && notionBgImage !== optimizedDataUrl) ? notionBgImage : (p.config?.bgImage ?? null),
                     bgAspectRatio: ar,
                     bgImageBlockId: notionBlockId || p.config?.bgImageBlockId,
                   }
