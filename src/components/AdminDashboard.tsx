@@ -109,6 +109,10 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
   const [addingReg, setAddingReg] = useState(false);
   const [addRegError, setAddRegError] = useState('');
 
+  // Background image upload state
+  const [bgUploading, setBgUploading] = useState(false);
+  const [bgUploadError, setBgUploadError] = useState('');
+
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -294,8 +298,10 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     if (!selectedProjectId) return;
     setSavingSettings(true);
     try {
+      const activeProject = projects.find((p: any) => p.id === selectedProjectId);
       const configToSave = {
         bgImage: settings.template.bgImage,
+        bgImageBlockId: activeProject?.config?.bgImageBlockId || null,
         bgAspectRatio: settings.template.bgAspectRatio ?? (16 / 9),
         fields: projectFields,
         roles: projectRoles,
@@ -430,7 +436,7 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     reader.onload = (ev: any) => {
       const sourceDataUrl = ev.target.result as string;
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         const maxWidth = 1920;
         const scale = Math.min(1, maxWidth / img.width);
         const width = Math.max(1, Math.round(img.width * scale));
@@ -447,7 +453,60 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
           ? canvas.toDataURL(mimeType)
           : canvas.toDataURL(mimeType, 0.9);
         const ar = width / height;
+
+        // Set local preview immediately
         setSettings((prev: any) => ({ ...prev, template: { ...prev.template, bgImage: optimizedDataUrl, bgAspectRatio: ar } }));
+
+        // Auto-save to Notion immediately using the existing /config endpoint
+        // so the image persists across browsers without needing a manual "Guardar" click.
+        if (selectedProjectId) {
+          setBgUploading(true);
+          setBgUploadError('');
+          try {
+            const activeProject = projects.find((p: any) => p.id === selectedProjectId);
+            const configToSave = {
+              bgImage: optimizedDataUrl,
+              bgAspectRatio: ar,
+              bgImageBlockId: activeProject?.config?.bgImageBlockId || null,
+              fields: projectFields,
+              roles: projectRoles,
+              nameField: projectFields.find(f => f.id === 'nameField') ?? DEFAULT_FIELDS[0],
+              idField: projectFields.find(f => f.id === 'idField') ?? DEFAULT_FIELDS[1],
+              roleField: projectFields.find(f => f.id === 'roleField') ?? DEFAULT_FIELDS[2],
+            };
+            const res = await fetch(`/api/notion/projects/${selectedProjectId}/config`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ config: configToSave }),
+            });
+            const result = await res.json();
+            if (!result.success) {
+              setBgUploadError(result.message || 'Error al guardar imagen en Notion');
+            } else {
+              // If the server uploaded the image to Notion, replace the local base64 with the hosted URL
+              const notionBgImage = result.bgImage;
+              const notionBlockId = result.bgImageBlockId;
+              if (notionBgImage && notionBgImage !== optimizedDataUrl) {
+                setSettings((prev: any) => ({ ...prev, template: { ...prev.template, bgImage: notionBgImage } }));
+              }
+              setProjects((prev: any[]) => prev.map(p =>
+                p.id === selectedProjectId ? {
+                  ...p,
+                  config: {
+                    ...(p.config || {}),
+                    bgImage: notionBgImage || optimizedDataUrl,
+                    bgAspectRatio: ar,
+                    bgImageBlockId: notionBlockId || p.config?.bgImageBlockId,
+                  }
+                } : p
+              ));
+            }
+          } catch {
+            setBgUploadError('Error de red al guardar imagen en Notion');
+          } finally {
+            setBgUploading(false);
+          }
+        }
       };
       img.src = sourceDataUrl;
     };
@@ -889,8 +948,8 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Imagen de Fondo</label>
                   {!settings.template?.bgImage ? (
                     <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-pink-500 rounded-xl p-5 text-center transition-all bg-slate-50 dark:bg-slate-950/40">
-                      <input type="file" accept="image/*" id="bg-upload-field" className="hidden" onChange={handleLogoUpload} />
-                      <label htmlFor="bg-upload-field" className="cursor-pointer flex flex-col items-center gap-1.5">
+                      <input type="file" accept="image/*" id="bg-upload-field" className="hidden" onChange={handleLogoUpload} disabled={bgUploading} />
+                      <label htmlFor="bg-upload-field" className={`cursor-pointer flex flex-col items-center gap-1.5 ${bgUploading ? 'opacity-50 pointer-events-none' : ''}`}>
                         <Upload className="w-7 h-7 text-pink-500" />
                         <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">Elegir PNG o JPG</span>
                         <span className="text-[10px] text-slate-400">El canvas se ajustará al tamaño de la imagen</span>
@@ -902,14 +961,20 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                         <img src={settings.template.bgImage} className="w-12 h-8 object-cover rounded border border-slate-300 dark:border-slate-700" alt="fondo" />
                         <div>
                           <span className="text-xs font-bold text-slate-800 dark:text-white block">Fondo activo</span>
-                          <span className="text-[10px] text-emerald-500 font-mono">{ar.toFixed(2)}:1</span>
+                          {bgUploading
+                            ? <span className="text-[10px] text-amber-500 font-semibold animate-pulse">Guardando en Notion…</span>
+                            : <span className="text-[10px] text-emerald-500 font-mono">{ar.toFixed(2)}:1</span>}
                         </div>
                       </div>
                       <button onClick={() => setSettings((p: any) => ({ ...p, template: { ...p.template, bgImage: null, bgAspectRatio: 16 / 9 } }))}
-                        className="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+                        disabled={bgUploading}
+                        className="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-40">
                         Remover
                       </button>
                     </div>
+                  )}
+                  {bgUploadError && (
+                    <p className="text-[10px] text-red-500 mt-1">{bgUploadError}</p>
                   )}
                 </div>
 

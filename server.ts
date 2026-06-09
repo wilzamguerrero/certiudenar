@@ -82,6 +82,9 @@ function writeDb(settings: AdminSettings, projectsConfig: Record<string, any> = 
 }
 
 const BG_BLOCK_CAPTION_PREFIX = '__CERT_BG__';
+const BG_IMG_BLOCK_CAPTION = '__CERT_BG_IMG__';
+const NOTION_API_BASE_URL = 'https://api.notion.com/v1';
+const NOTION_API_VER = '2022-06-28';
 const BG_TEXT_CHUNK_SIZE = 1800;
 const BG_TEXT_CHUNKS_PER_BLOCK = 80;
 const NOTION_PLAIN_TEXT_LANGUAGE = 'plain text';
@@ -168,6 +171,92 @@ async function saveBgImageBlocksToNotion(toggleBlockId: string, results: any[], 
 
   for (let index = groups.length; index < existingBgBlocks.length; index++) {
     await (notion.blocks.delete as any)({ block_id: existingBgBlocks[index].id }).catch(() => null);
+  }
+}
+
+// ─── Notion: upload background image as native Notion image block ──────────────
+async function uploadBgImageToNotion(
+  toggleBlockId: string,
+  imageBuffer: Buffer,
+  mimeType: string,
+  filename: string,
+): Promise<{ blockId: string; imageUrl: string } | null> {
+  try {
+    // Step 1: Init single-part file upload
+    const initResp = await fetch(`${NOTION_API_BASE_URL}/file_uploads`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${NOTION_SECRET}`,
+        'Notion-Version': NOTION_API_VER,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mode: 'single_part', filename, content_type: mimeType }),
+    });
+    if (!initResp.ok) {
+      console.error('Notion file upload init failed:', await initResp.text());
+      return null;
+    }
+    const initData = (await initResp.json()) as any;
+    const { id: uploadId, upload_url } = initData;
+
+    // Step 2: Upload binary content via multipart form
+    const formData = new FormData();
+    formData.append('file', new Blob([new Uint8Array(imageBuffer)], { type: mimeType }), filename);
+    const uploadResp = await fetch(upload_url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${NOTION_SECRET}`,
+        'Notion-Version': NOTION_API_VER,
+      },
+      body: formData,
+    });
+    if (!uploadResp.ok) {
+      console.error('Notion file upload content failed:', await uploadResp.text());
+      return null;
+    }
+
+    // Step 3: Remove old bg image block and old base64 code blocks
+    const existingChildren = await notion.blocks.children.list({ block_id: toggleBlockId });
+    const existingBlocks: any[] = existingChildren.results || [];
+    const oldImgBlock = existingBlocks.find((b: any) =>
+      b.type === 'image' &&
+      (b.image?.caption || []).map((t: any) => t.plain_text).join('') === BG_IMG_BLOCK_CAPTION,
+    );
+    if (oldImgBlock) {
+      await (notion.blocks.delete as any)({ block_id: oldImgBlock.id }).catch((e: any) =>
+        console.warn('Failed to delete old image block:', e),
+      );
+    }
+    for (const block of existingBlocks.filter(isBgBlock)) {
+      await (notion.blocks.delete as any)({ block_id: block.id }).catch(() => null);
+    }
+
+    // Step 4: Append image block referencing the uploaded file
+    const appendResp = await notion.blocks.children.append({
+      block_id: toggleBlockId,
+      children: [{
+        object: 'block',
+        type: 'image',
+        image: {
+          type: 'file_upload',
+          file_upload: { id: uploadId },
+          caption: [{ type: 'text', text: { content: BG_IMG_BLOCK_CAPTION } }],
+        } as any,
+      } as any],
+    });
+    const newBlockId = (appendResp.results as any[])[0]?.id;
+    if (!newBlockId) return null;
+
+    // Step 5: Retrieve the block to get the fresh signed URL
+    await new Promise(r => setTimeout(r, 400));
+    const blockDetail = await (notion.blocks.retrieve as any)({ block_id: newBlockId });
+    const imageUrl: string =
+      blockDetail?.image?.file?.url || blockDetail?.image?.external?.url || '';
+
+    return { blockId: newBlockId, imageUrl };
+  } catch (e: any) {
+    console.error('uploadBgImageToNotion error:', e.message);
+    return null;
   }
 }
 
@@ -265,112 +354,61 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
     });
     if (matchingDb) { await ensureDbProperties(matchingDb.id); return matchingDb.id; }
 
-    // 5. Prefer a child page inside the toggle, then place the database inside that page.
-    let childPageId = childPage?.id || null;
-    if (!childPageId) {
-      try {
-        const pageResp = await notion.blocks.children.append({
-          block_id: toggleBlockId,
-          children: [{
-            object: 'block',
-            type: 'child_page',
-            child_page: { title: `Participantes - ${projectTitle}` }
-          } as any]
-        });
-        childPageId = pageResp.results?.[0]?.id || null;
-      } catch {}
-    }
+    // 5. PRIMARY: Create inline database with the toggle block's ID as parent page_id.
+    //    Notion's API accepts block IDs in the page_id field for inline databases,
+    //    which places the database visually inside the toggle.
+    const DB_PROPERTIES = {
+      "Nombre": { title: {} },
+      "Identificacion": { rich_text: {} },
+      "Rol": {
+        select: {
+          options: [
+            { name: "estudiante", color: "blue" },
+            { name: "egresado", color: "purple" },
+            { name: "empresario", color: "orange" }
+          ]
+        }
+      },
+      "Correo": { email: {} },
+      "Estado": {
+        select: {
+          options: [
+            { name: "recibido", color: "yellow" },
+            { name: "incorrecto", color: "red" },
+            { name: "certificado", color: "green" }
+          ]
+        }
+      },
+      "Generado": { date: {} },
+      "Enlace Descarga": { files: {} }
+    };
 
-    if (childPageId) {
+    try {
       const db = await notion.databases.create({
-        parent: { type: 'page_id', page_id: childPageId },
+        parent: { type: 'page_id', page_id: toggleBlockId },
         is_inline: true,
         title: [{ type: 'text', text: { content: `Participantes - ${projectTitle}` } }],
-        properties: {
-          "Nombre": { title: {} },
-          "Identificacion": { rich_text: {} },
-          "Rol": {
-            select: {
-              options: [
-                { name: "estudiante", color: "blue" },
-                { name: "egresado", color: "purple" },
-                { name: "empresario", color: "orange" }
-              ]
-            }
-          },
-          "Correo": { email: {} },
-          "Estado": {
-            select: {
-              options: [
-                { name: "recibido", color: "yellow" },
-                { name: "incorrecto", color: "red" },
-                { name: "certificado", color: "green" }
-              ]
-            }
-          },
-          "Generado": { date: {} },
-          "Enlace Descarga": { files: {} }
-        }
+        properties: DB_PROPERTIES,
       });
-
-      await ensureDbProperties(db.id);
-      return db.id;
-    }
-
-    // 6. Try to create an inline database INSIDE the toggle block
-    let dbId: string | null = null;
-    try {
-      const dbAppendResp = await (notion.blocks.children.append as any)({
-        block_id: toggleBlockId,
-        children: [{
-          object: 'block',
-          type: 'child_database',
-          child_database: { title: `Participantes - ${projectTitle}` }
-        }]
-      });
-      dbId = dbAppendResp.results?.[0]?.id || null;
-      if (dbId) {
-        await ensureDbProperties(dbId);
-        return dbId;
+      if (db.id) {
+        console.info(`Created inline database inside toggle: ${db.id}`);
+        await ensureDbProperties(db.id);
+        return db.id;
       }
-    } catch (inlineErr) {
-      console.warn('Inline child_database in toggle not supported, falling back to page level:', inlineErr);
+    } catch (inlineErr: any) {
+      console.warn('Inline database inside toggle failed, using parent page fallback:', inlineErr.message);
     }
 
-    // 7. Final fallback: create database at parent page level + store __DB_ID__ reference
+    // 6. Final fallback: create at parent page level + store __DB_ID__ reference inside toggle
     const db = await notion.databases.create({
       parent: { type: 'page_id', page_id: PARENT_PAGE_ID },
       is_inline: true,
       title: [{ type: 'text', text: { content: `Participantes - ${projectTitle}` } }],
-      properties: {
-        "Nombre": { title: {} },
-        "Identificacion": { rich_text: {} },
-        "Rol": {
-          select: {
-            options: [
-              { name: "estudiante", color: "blue" },
-              { name: "egresado", color: "purple" },
-              { name: "empresario", color: "orange" }
-            ]
-          }
-        },
-        "Correo": { email: {} },
-        "Estado": {
-          select: {
-            options: [
-              { name: "recibido", color: "yellow" },
-              { name: "incorrecto", color: "red" },
-              { name: "certificado", color: "green" }
-            ]
-          }
-        },
-        "Generado": { date: {} },
-        "Enlace Descarga": { files: {} }
-      }
+      properties: DB_PROPERTIES,
     });
 
     const fallbackDbId: string = db.id;
-    dbId = fallbackDbId;
+    const dbId: string = fallbackDbId;
 
     // Store DB reference inside toggle for future lookups
     try {
@@ -411,42 +449,103 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
 }
 
 // ─── Notion: save template config + bg inside toggle ─────────────────────────
-async function saveNotionProjectConfigToNotion(toggleBlockId: string, config: any) {
+async function saveNotionProjectConfigToNotion(toggleBlockId: string, config: any): Promise<{ bgImageBlockId?: string; bgImage?: string } | null> {
   try {
     const listResponse = await notion.blocks.children.list({ block_id: toggleBlockId });
     const results: any[] = listResponse.results || [];
 
-    const existingCodeBlock = results.find((b: any) => b.type === 'code' && b.code?.language === 'json');
+    // ── Handle background image ───────────────────────────────────────────────
+    // If bgImage is a data: URL, upload it to Notion as a native image block.
+    // This replaces the old base64-in-code-block approach and avoids the
+    // rich_text[].length ≤ 100 Notion API limit.
+    let resolvedBgImage: string | null = config.bgImage || null;
+    let resolvedBgImageBlockId: string | null = config.bgImageBlockId || null;
+
+    if (resolvedBgImage && resolvedBgImage.startsWith('data:')) {
+      const mimeMatch = resolvedBgImage.match(/^data:(image\/[^;]+);base64,/);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const base64Data = resolvedBgImage.split(',')[1];
+      if (base64Data) {
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+        const filename = mimeType === 'image/png' ? 'background.png' : 'background.jpg';
+        const uploadResult = await uploadBgImageToNotion(toggleBlockId, imageBuffer, mimeType, filename);
+        if (uploadResult) {
+          resolvedBgImage = uploadResult.imageUrl;
+          resolvedBgImageBlockId = uploadResult.blockId;
+          console.info('Background image uploaded to Notion:', uploadResult.blockId);
+        } else {
+          console.warn('Image upload to Notion failed; skipping bg image persistence.');
+          resolvedBgImage = null;
+        }
+      }
+    } else if (!resolvedBgImage) {
+      // bgImage removed: delete any existing native image block
+      const imgBlock = results.find((b: any) =>
+        b.type === 'image' &&
+        (b.image?.caption || []).map((t: any) => t.plain_text).join('') === BG_IMG_BLOCK_CAPTION,
+      );
+      if (imgBlock) {
+        await (notion.blocks.delete as any)({ block_id: imgBlock.id }).catch(() => null);
+      }
+      // Also delete old base64 code blocks
+      await saveBgImageBlocksToNotion(toggleBlockId, results, null);
+    }
+    // If bgImage is already a hosted URL (not data:), no action needed — it's already in Notion.
+
+    // ── Save JSON config block ────────────────────────────────────────────────
     const serializeConfig = {
       fields: config.fields,
       bgAspectRatio: config.bgAspectRatio,
       roles: config.roles,
+      bgImageBlockId: resolvedBgImageBlockId,
       // Legacy backward compat
       nameField: config.nameField ?? (Array.isArray(config.fields) ? config.fields.find((f: any) => f.id === 'nameField') : undefined),
       idField: config.idField ?? (Array.isArray(config.fields) ? config.fields.find((f: any) => f.id === 'idField') : undefined),
       roleField: config.roleField ?? (Array.isArray(config.fields) ? config.fields.find((f: any) => f.id === 'roleField') : undefined),
     };
     const configJsonString = JSON.stringify(serializeConfig, null, 2);
-    const jsonChunks: any[] = [];
-    for (let i = 0; i < configJsonString.length; i += 2000) {
-      jsonChunks.push({ type: 'text', text: { content: configJsonString.substring(i, i + 2000) } });
+
+    // Notion limits rich_text to 100 items per block; split JSON across multiple blocks if needed
+    const MAX_RT_ITEMS = 95; // safe margin below 100
+    const CHUNK_SIZE = 2000;
+    const allJsonChunks: any[] = [];
+    for (let i = 0; i < configJsonString.length; i += CHUNK_SIZE) {
+      allJsonChunks.push({ type: 'text', text: { content: configJsonString.substring(i, i + CHUNK_SIZE) } });
     }
 
-    if (existingCodeBlock) {
-      await notion.blocks.update({ block_id: existingCodeBlock.id, code: { rich_text: jsonChunks, language: 'json' } });
-    } else {
-      await notion.blocks.children.append({
-        block_id: toggleBlockId,
-        children: [{
-          object: 'block', type: 'code',
-          code: { caption: [{ type: 'text', text: { content: 'Configuración de Plantilla (JSON)' } }], rich_text: jsonChunks, language: 'json' }
-        }]
-      });
+    // Find existing JSON code blocks (may be multiple if config was previously split)
+    const existingJsonBlocks = results.filter((b: any) => b.type === 'code' && b.code?.language === 'json');
+
+    const jsonBlockGroups: any[][] = [];
+    for (let i = 0; i < allJsonChunks.length; i += MAX_RT_ITEMS) {
+      jsonBlockGroups.push(allJsonChunks.slice(i, i + MAX_RT_ITEMS));
+    }
+    // Ensure at least one block group (handles empty config)
+    if (jsonBlockGroups.length === 0) jsonBlockGroups.push([{ type: 'text', text: { content: '{}' } }]);
+
+    for (let idx = 0; idx < jsonBlockGroups.length; idx++) {
+      const richText = jsonBlockGroups[idx];
+      const caption = idx === 0
+        ? [{ type: 'text', text: { content: 'Configuración de Plantilla (JSON)' } }]
+        : [{ type: 'text', text: { content: `Configuración de Plantilla (JSON) parte ${idx + 1}` } }];
+      if (existingJsonBlocks[idx]) {
+        await notion.blocks.update({ block_id: existingJsonBlocks[idx].id, code: { rich_text: richText, language: 'json' } });
+      } else {
+        await notion.blocks.children.append({
+          block_id: toggleBlockId,
+          children: [{ object: 'block', type: 'code', code: { caption, rich_text: richText, language: 'json' } }],
+        });
+      }
+    }
+    // Remove extra old JSON blocks if we now need fewer
+    for (let idx = jsonBlockGroups.length; idx < existingJsonBlocks.length; idx++) {
+      await (notion.blocks.delete as any)({ block_id: existingJsonBlocks[idx].id }).catch(() => null);
     }
 
-    await saveBgImageBlocksToNotion(toggleBlockId, results, config.bgImage || null);
+    return resolvedBgImageBlockId ? { bgImageBlockId: resolvedBgImageBlockId, bgImage: resolvedBgImage ?? undefined } : null;
   } catch (err) {
     console.error('Error synchronizing layout config to Notion:', err);
+    return null;
   }
 }
 
@@ -562,10 +661,32 @@ async function startServer() {
               const txt = (codeBlock.code?.rich_text || []).map((t: any) => t.plain_text).join('');
               if (txt) parsedLayout = JSON.parse(txt);
             }
-            const parsedBg = readBgImageFromBlocks(blks);
+
+            // Prefer native image block (new approach); fall back to base64 code blocks (legacy)
+            const bgImgBlock = blks.find((b: any) =>
+              b.type === 'image' &&
+              (b.image?.caption || []).map((t: any) => t.plain_text).join('') === BG_IMG_BLOCK_CAPTION,
+            );
+            let parsedBg: string | null = null;
+            let bgImageBlockId: string | null = parsedLayout.bgImageBlockId || null;
+            if (bgImgBlock) {
+              parsedBg = bgImgBlock.image?.file?.url || bgImgBlock.image?.external?.url || null;
+              bgImageBlockId = bgImgBlock.id;
+            } else if (bgImageBlockId) {
+              // Block ID known but block not in first-page results — try to retrieve fresh URL
+              try {
+                const freshBlock = await (notion.blocks.retrieve as any)({ block_id: bgImageBlockId });
+                parsedBg = freshBlock?.image?.file?.url || freshBlock?.image?.external?.url || null;
+              } catch { bgImageBlockId = null; }
+            }
+            if (!parsedBg) {
+              parsedBg = readBgImageFromBlocks(blks);
+            }
+
             if (Object.keys(parsedLayout).length > 0 || parsedBg || projectDailyCode) {
               config = {
                 bgImage: parsedBg,
+                bgImageBlockId,
                 bgAspectRatio: parsedLayout.bgAspectRatio ?? null,
                 fields: parsedLayout.fields ?? null,
                 roles: parsedLayout.roles ?? null,
@@ -653,11 +774,61 @@ async function startServer() {
       const { id } = req.params;
       const { config } = req.body;
       const { settings, projectsConfig } = readDb();
-      projectsConfig[id] = config;
+      // Don't persist base64 images in the local JSON store — only store the Notion block URL/ID
+      const cacheConfig = { ...config };
+      if (cacheConfig.bgImage?.startsWith('data:')) delete cacheConfig.bgImage;
+      projectsConfig[id] = cacheConfig;
       writeDb(settings, projectsConfig);
-      await saveNotionProjectConfigToNotion(id, config);
-      res.json({ success: true, message: 'Configuración guardada' });
+      const saveResult = await saveNotionProjectConfigToNotion(id, config);
+      // If the save uploaded a new image, update the local cache with the Notion block data
+      if (saveResult?.bgImageBlockId) {
+        projectsConfig[id].bgImageBlockId = saveResult.bgImageBlockId;
+        if (saveResult.bgImage) projectsConfig[id].bgImage = saveResult.bgImage;
+        writeDb(settings, projectsConfig);
+      }
+      res.json({
+        success: true,
+        message: 'Configuración guardada',
+        bgImage: saveResult?.bgImage ?? projectsConfig[id]?.bgImage ?? null,
+        bgImageBlockId: saveResult?.bgImageBlockId ?? projectsConfig[id]?.bgImageBlockId ?? null,
+      });
     } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // POST upload background image to Notion as native image block
+  app.post('/api/notion/projects/:id/upload-bg-image', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { imageDataUrl, mimeType } = req.body;
+      if (!imageDataUrl?.startsWith('data:')) {
+        return res.status(400).json({ success: false, message: 'imageDataUrl (base64 data URL) requerido' });
+      }
+      const base64Data = imageDataUrl.split(',')[1];
+      if (!base64Data) {
+        return res.status(400).json({ success: false, message: 'Imagen inválida' });
+      }
+      const imageBuffer = Buffer.from(base64Data, 'base64');
+      const safeMimeType = mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
+      const filename = safeMimeType === 'image/png' ? 'background.png' : 'background.jpg';
+
+      const uploadResult = await uploadBgImageToNotion(id, imageBuffer, safeMimeType, filename);
+      if (!uploadResult) {
+        return res.status(500).json({ success: false, message: 'Fallo al subir imagen a Notion. Revisa los logs del servidor.' });
+      }
+
+      // Update local cache with block ID + fresh URL
+      const { settings, projectsConfig } = readDb();
+      if (projectsConfig[id]) {
+        projectsConfig[id].bgImage = uploadResult.imageUrl;
+        projectsConfig[id].bgImageBlockId = uploadResult.blockId;
+      }
+      writeDb(settings, projectsConfig);
+
+      res.json({ success: true, imageUrl: uploadResult.imageUrl, blockId: uploadResult.blockId });
+    } catch (e: any) {
+      console.error('Error in upload-bg-image:', e);
       res.status(500).json({ success: false, message: e.message });
     }
   });
