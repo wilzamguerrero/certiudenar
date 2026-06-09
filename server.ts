@@ -92,6 +92,39 @@ async function getNotionProjects(): Promise<Array<{ id: string; title: string }>
   }
 }
 
+// ─── Notion: ensure DB has required columns (repair if missing) ───────────────
+async function ensureDbProperties(dbId: string): Promise<void> {
+  try {
+    const db = await notion.databases.retrieve({ database_id: dbId });
+    const existing = Object.keys((db as any).properties || {});
+    const toAdd: Record<string, any> = {};
+    if (!existing.includes('Identificacion')) toAdd['Identificacion'] = { rich_text: {} };
+    if (!existing.includes('Rol')) toAdd['Rol'] = {
+      select: { options: [
+        { name: 'estudiante', color: 'blue' },
+        { name: 'egresado', color: 'purple' },
+        { name: 'empresario', color: 'orange' }
+      ]}
+    };
+    if (!existing.includes('Correo')) toAdd['Correo'] = { email: {} };
+    if (!existing.includes('Estado')) toAdd['Estado'] = {
+      select: { options: [
+        { name: 'recibido', color: 'yellow' },
+        { name: 'incorrecto', color: 'red' },
+        { name: 'certificado', color: 'green' }
+      ]}
+    };
+    if (!existing.includes('Generado')) toAdd['Generado'] = { date: {} };
+    if (!existing.includes('Enlace Descarga')) toAdd['Enlace Descarga'] = { files: {} };
+    if (Object.keys(toAdd).length > 0) {
+      await notion.databases.update({ database_id: dbId, properties: toAdd });
+      console.info(`Repaired DB ${dbId}: added properties ${Object.keys(toAdd).join(', ')}`);
+    }
+  } catch (e) {
+    console.warn(`Could not verify/repair DB ${dbId} properties:`, e);
+  }
+}
+
 // ─── Notion: get or create DB for a project toggle ───────────────────────────
 async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle: string): Promise<string> {
   try {
@@ -105,7 +138,7 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
     );
     if (dbIdBlock) {
       const storedId = (dbIdBlock.code?.rich_text || []).map((t: any) => t.plain_text).join('').trim();
-      if (storedId) return storedId;
+      if (storedId) { await ensureDbProperties(storedId); return storedId; }
     }
 
     // 2. Check for existing child_page inside toggle that contains the DB
@@ -114,7 +147,7 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
       try {
         const pageChildren = await notion.blocks.children.list({ block_id: childPage.id });
         const dbBlock = (pageChildren.results || []).find((b: any) => b.type === 'child_database');
-        if (dbBlock) return dbBlock.id;
+        if (dbBlock) { await ensureDbProperties(dbBlock.id); return dbBlock.id; }
       } catch {}
     }
 
@@ -125,7 +158,7 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
       const t = (b.child_database?.title || '').trim().toLowerCase();
       return t === `participantes - ${projectTitle.toLowerCase()}`;
     });
-    if (matchingDb) return matchingDb.id;
+    if (matchingDb) { await ensureDbProperties(matchingDb.id); return matchingDb.id; }
 
     // 4. Determine where to create the DB
     // Try to create a child_page inside the toggle for clean structure
