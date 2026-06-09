@@ -37,6 +37,7 @@ function createNotion(secret: string) {
         append: (p: { block_id: string; children: unknown[] }) =>
           req('PATCH', `/blocks/${p.block_id}/children`, { children: p.children }),
       },
+      retrieve: (p: { block_id: string }) => req('GET', `/blocks/${p.block_id}`),
       delete: (p: { block_id: string }) => req('DELETE', `/blocks/${p.block_id}`),
       update: (p: { block_id: string; [k: string]: unknown }) => {
         const { block_id, ...rest } = p;
@@ -74,9 +75,25 @@ function json(data: unknown, status = 200) {
 }
 
 const BG_BLOCK_CAPTION_PREFIX = '__CERT_BG__';
+const BG_IMG_BLOCK_CAPTION = '__CERT_BG_IMG__';
+const NOTION_API_BASE_URL = 'https://api.notion.com/v1';
+const NOTION_API_VER = '2022-06-28';
 const BG_TEXT_CHUNK_SIZE = 1800;
 const BG_TEXT_CHUNKS_PER_BLOCK = 80;
 const NOTION_PLAIN_TEXT_LANGUAGE = 'plain text';
+
+function buildBgImageProxyUrl(blockId: string) {
+  return `/api/notion/blocks/${encodeURIComponent(blockId)}/image`;
+}
+
+function decodeBase64ToBytes(base64: string) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
 
 function richTextToPlainText(richText: any[] = []) {
   return richText.map((item: any) => item?.plain_text || item?.text?.content || '').join('');
@@ -163,6 +180,81 @@ async function saveBgImageBlocksToNotion(notion: Notion, toggleBlockId: string, 
 
   for (let index = groups.length; index < existingBgBlocks.length; index++) {
     await notion.blocks.delete({ block_id: existingBgBlocks[index].id }).catch(() => null);
+  }
+}
+
+async function uploadBgImageToNotion(
+  notion: Notion,
+  notionSecret: string,
+  toggleBlockId: string,
+  imageBytes: Uint8Array,
+  mimeType: string,
+  filename: string,
+): Promise<{ blockId: string } | null> {
+  try {
+    const initResp = await fetch(`${NOTION_API_BASE_URL}/file_uploads`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${notionSecret}`,
+        'Notion-Version': NOTION_API_VER,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mode: 'single_part', filename, content_type: mimeType }),
+    });
+    if (!initResp.ok) {
+      console.error('Notion file upload init failed:', await initResp.text());
+      return null;
+    }
+
+    const initData = (await initResp.json()) as any;
+    const formData = new FormData();
+    formData.append('file', new Blob([imageBytes], { type: mimeType }), filename);
+
+    const uploadResp = await fetch(initData.upload_url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${notionSecret}`,
+        'Notion-Version': NOTION_API_VER,
+      },
+      body: formData,
+    });
+    if (!uploadResp.ok) {
+      console.error('Notion file upload content failed:', await uploadResp.text());
+      return null;
+    }
+
+    const existingChildren = await notion.blocks.children.list({ block_id: toggleBlockId });
+    const existingBlocks: any[] = existingChildren.results || [];
+    const oldImgBlock = existingBlocks.find((block: any) =>
+      block.type === 'image' &&
+      (block.image?.caption || []).map((item: any) => item.plain_text).join('') === BG_IMG_BLOCK_CAPTION,
+    );
+    if (oldImgBlock) {
+      await notion.blocks.delete({ block_id: oldImgBlock.id }).catch(() => null);
+    }
+    for (const block of existingBlocks.filter(isBgBlock)) {
+      await notion.blocks.delete({ block_id: block.id }).catch(() => null);
+    }
+
+    const appendResp: any = await notion.blocks.children.append({
+      block_id: toggleBlockId,
+      children: [
+        {
+          object: 'block',
+          type: 'image',
+          image: {
+            type: 'file_upload',
+            file_upload: { id: initData.id },
+            caption: [{ type: 'text', text: { content: BG_IMG_BLOCK_CAPTION } }],
+          } as any,
+        } as any,
+      ],
+    });
+    const newBlockId = appendResp.results?.[0]?.id;
+    return newBlockId ? { blockId: newBlockId } : null;
+  } catch (e) {
+    console.error('uploadBgImageToNotion error:', e);
+    return null;
   }
 }
 
@@ -453,14 +545,45 @@ async function saveProjectDailyCode(notion: Notion, toggleBlockId: string, code:
   }
 }
 
-async function saveNotionProjectConfigToNotion(notion: Notion, toggleBlockId: string, config: any) {
+async function saveNotionProjectConfigToNotion(
+  notion: Notion,
+  notionSecret: string,
+  toggleBlockId: string,
+  config: any,
+): Promise<{ bgImageBlockId?: string; bgImage?: string } | null> {
   const listResponse = await notion.blocks.children.list({ block_id: toggleBlockId });
   const results: any[] = listResponse.results || [];
+
+  let resolvedBgImageBlockId: string | null = config.bgImageBlockId || null;
+  const requestedBgImage = typeof config.bgImage === 'string' ? config.bgImage : null;
+
+  if (requestedBgImage?.startsWith('data:')) {
+    const mimeMatch = requestedBgImage.match(/^data:(image\/[^;]+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const base64Data = requestedBgImage.split(',')[1];
+    if (base64Data) {
+      const imageBytes = decodeBase64ToBytes(base64Data);
+      const filename = mimeType === 'image/png' ? 'background.png' : 'background.jpg';
+      const uploadResult = await uploadBgImageToNotion(notion, notionSecret, toggleBlockId, imageBytes, mimeType, filename);
+      resolvedBgImageBlockId = uploadResult?.blockId || null;
+    }
+  } else if (!requestedBgImage) {
+    const imgBlock = results.find((block: any) =>
+      block.type === 'image' &&
+      (block.image?.caption || []).map((item: any) => item.plain_text).join('') === BG_IMG_BLOCK_CAPTION,
+    );
+    if (imgBlock) {
+      await notion.blocks.delete({ block_id: imgBlock.id }).catch(() => null);
+    }
+    await saveBgImageBlocksToNotion(notion, toggleBlockId, results, null);
+    resolvedBgImageBlockId = null;
+  }
 
   const serializeConfig = {
     fields: config.fields,
     bgAspectRatio: config.bgAspectRatio,
     roles: config.roles,
+    bgImageBlockId: resolvedBgImageBlockId,
     nameField: config.nameField,
     idField: config.idField,
     roleField: config.roleField,
@@ -496,7 +619,9 @@ async function saveNotionProjectConfigToNotion(notion: Notion, toggleBlockId: st
     });
   }
 
-  await saveBgImageBlocksToNotion(notion, toggleBlockId, results, config.bgImage || null);
+  return resolvedBgImageBlockId
+    ? { bgImageBlockId: resolvedBgImageBlockId, bgImage: buildBgImageProxyUrl(resolvedBgImageBlockId) }
+    : null;
 }
 
 function parseStatus(raw: string): 'recibido' | 'incorrecto' | 'certificado' {
@@ -570,6 +695,32 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ success: true, message: 'Ajustes aceptados' });
     }
 
+    // ── GET /api/notion/blocks/:blockId/image ─────────────────────────────
+    const bgImageMatch = path.match(/^\/api\/notion\/blocks\/([^/]+)\/image$/);
+    if (bgImageMatch && method === 'GET') {
+      const [, rawBlockId] = bgImageMatch;
+      const blockId = decodeURIComponent(rawBlockId);
+      const block: any = await notion.blocks.retrieve({ block_id: blockId });
+      const imageUrl = block?.image?.file?.url || block?.image?.external?.url || '';
+      if (!imageUrl) {
+        return json({ success: false, message: 'Imagen no encontrada' }, 404);
+      }
+
+      const upstream = await fetch(imageUrl);
+      if (!upstream.ok || !upstream.body) {
+        return json({ success: false, message: 'No se pudo descargar la imagen desde Notion' }, 502);
+      }
+
+      return new Response(upstream.body, {
+        status: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-store',
+          'Content-Type': upstream.headers.get('content-type') || 'application/octet-stream',
+        },
+      });
+    }
+
     // ── GET /api/notion/projects ────────────────────────────────────────────
     if (path === '/api/notion/projects' && method === 'GET') {
       const projects = await getNotionProjects(notion, PARENT);
@@ -587,12 +738,18 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               const txt = (codeBlock.code?.rich_text || []).map((t: any) => t.plain_text).join('');
               if (txt) layout = JSON.parse(txt);
             }
-            const bgImage = readBgImageFromBlocks(blks);
+            const bgImgBlock = blks.find((block: any) =>
+              block.type === 'image' &&
+              (block.image?.caption || []).map((item: any) => item.plain_text).join('') === BG_IMG_BLOCK_CAPTION,
+            );
+            const bgImageBlockId = bgImgBlock?.id || layout.bgImageBlockId || null;
+            const bgImage = bgImageBlockId ? buildBgImageProxyUrl(bgImageBlockId) : readBgImageFromBlocks(blks);
             return {
               id: proj.id,
               title: proj.title,
               config: {
                 bgImage,
+                bgImageBlockId,
                 bgAspectRatio: layout.bgAspectRatio ?? null,
                 fields: layout.fields ?? null,
                 roles: layout.roles ?? null,
@@ -647,8 +804,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (configMatch && method === 'POST') {
       const [, id] = configMatch;
       const { config } = body;
-      await saveNotionProjectConfigToNotion(notion, id, config);
-      return json({ success: true, message: 'Configuración guardada' });
+      const saveResult = await saveNotionProjectConfigToNotion(notion, env.NOTION_SECRET, id, config);
+      return json({
+        success: true,
+        message: 'Configuración guardada',
+        bgImage: saveResult?.bgImage ?? (config?.bgImageBlockId ? buildBgImageProxyUrl(config.bgImageBlockId) : config?.bgImage ?? null),
+        bgImageBlockId: saveResult?.bgImageBlockId ?? config?.bgImageBlockId ?? null,
+      });
     }
 
     // ── POST /api/notion/projects/:id/daily-code ───────────────────────────

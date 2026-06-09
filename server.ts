@@ -89,6 +89,10 @@ const BG_TEXT_CHUNK_SIZE = 1800;
 const BG_TEXT_CHUNKS_PER_BLOCK = 80;
 const NOTION_PLAIN_TEXT_LANGUAGE = 'plain text';
 
+function buildBgImageProxyUrl(blockId: string) {
+  return `/api/notion/blocks/${encodeURIComponent(blockId)}/image`;
+}
+
 function richTextToPlainText(richText: any[] = []) {
   return richText.map((item: any) => item?.plain_text || item?.text?.content || '').join('');
 }
@@ -516,8 +520,8 @@ async function saveNotionProjectConfigToNotion(toggleBlockId: string, config: an
         const filename = mimeType === 'image/png' ? 'background.png' : 'background.jpg';
         const uploadResult = await uploadBgImageToNotion(toggleBlockId, imageBuffer, mimeType, filename);
         if (uploadResult) {
-          resolvedBgImage = uploadResult.imageUrl;
           resolvedBgImageBlockId = uploadResult.blockId;
+          resolvedBgImage = buildBgImageProxyUrl(uploadResult.blockId);
           console.info('Background image uploaded to Notion:', uploadResult.blockId);
         } else {
           console.warn('Image upload to Notion failed; skipping bg image persistence.');
@@ -537,6 +541,10 @@ async function saveNotionProjectConfigToNotion(toggleBlockId: string, config: an
       await saveBgImageBlocksToNotion(toggleBlockId, results, null);
     }
     // If bgImage is already a hosted URL (not data:), no action needed — it's already in Notion.
+
+    if (resolvedBgImageBlockId) {
+      resolvedBgImage = buildBgImageProxyUrl(resolvedBgImageBlockId);
+    }
 
     // ── Save JSON config block ────────────────────────────────────────────────
     const serializeConfig = {
@@ -588,7 +596,9 @@ async function saveNotionProjectConfigToNotion(toggleBlockId: string, config: an
       await (notion.blocks.delete as any)({ block_id: existingJsonBlocks[idx].id }).catch(() => null);
     }
 
-    return resolvedBgImageBlockId ? { bgImageBlockId: resolvedBgImageBlockId, bgImage: resolvedBgImage ?? undefined } : null;
+    return resolvedBgImageBlockId
+      ? { bgImageBlockId: resolvedBgImageBlockId, bgImage: buildBgImageProxyUrl(resolvedBgImageBlockId) }
+      : null;
   } catch (err) {
     console.error('Error synchronizing layout config to Notion:', err);
     return null;
@@ -696,26 +706,12 @@ async function startServer() {
       for (const proj of projects) {
         let config = projectsConfig[proj.id];
 
-        // If cached config has a stale bgImage (base64 data URL or empty URL) but has a
-        // bgImageBlockId, refresh the signed URL from Notion before serving.
         if (config && config.bgImageBlockId) {
-          const isBase64 = typeof config.bgImage === 'string' && config.bgImage.startsWith('data:');
-          const isEmpty = !config.bgImage;
-          if (isBase64 || isEmpty) {
-            try {
-              const freshBlock = await (notion.blocks.retrieve as any)({ block_id: config.bgImageBlockId });
-              const freshUrl: string = freshBlock?.image?.file?.url || freshBlock?.image?.external?.url || '';
-              if (freshUrl) {
-                config = { ...config, bgImage: freshUrl };
-                projectsConfig[proj.id] = config;
-                hasUpdates = true;
-              } else if (isBase64) {
-                // Can't refresh — clear the stored base64 to avoid polluting the cache
-                config = { ...config, bgImage: null };
-                projectsConfig[proj.id] = config;
-                hasUpdates = true;
-              }
-            } catch { /* keep existing config */ }
+          const proxyBgImage = buildBgImageProxyUrl(config.bgImageBlockId);
+          if (config.bgImage !== proxyBgImage) {
+            config = { ...config, bgImage: proxyBgImage };
+            projectsConfig[proj.id] = config;
+            hasUpdates = true;
           }
         } else if (config && typeof config.bgImage === 'string' && config.bgImage.startsWith('data:')) {
           // Legacy: base64 stored in cache but no block ID — clear it so we reload from Notion
@@ -743,17 +739,11 @@ async function startServer() {
               b.type === 'image' &&
               (b.image?.caption || []).map((t: any) => t.plain_text).join('') === BG_IMG_BLOCK_CAPTION,
             );
-            let parsedBg: string | null = null;
             let bgImageBlockId: string | null = parsedLayout.bgImageBlockId || null;
+            let parsedBg: string | null = bgImageBlockId ? buildBgImageProxyUrl(bgImageBlockId) : null;
             if (bgImgBlock) {
-              parsedBg = bgImgBlock.image?.file?.url || bgImgBlock.image?.external?.url || null;
               bgImageBlockId = bgImgBlock.id;
-            } else if (bgImageBlockId) {
-              // Block ID known but block not in first-page results — try to retrieve fresh URL
-              try {
-                const freshBlock = await (notion.blocks.retrieve as any)({ block_id: bgImageBlockId });
-                parsedBg = freshBlock?.image?.file?.url || freshBlock?.image?.external?.url || null;
-              } catch { bgImageBlockId = null; }
+              parsedBg = buildBgImageProxyUrl(bgImageBlockId);
             }
             if (!parsedBg) {
               parsedBg = readBgImageFromBlocks(blks);
@@ -798,6 +788,34 @@ async function startServer() {
       res.json({ success: true, data: enrichedProjects });
     } catch (e: any) {
       res.status(500).json({ success: false, message: `Error al cargar proyectos: ${e.message}` });
+    }
+  });
+
+  // GET proxy for a project's Notion background image block.
+  // Using a same-origin URL avoids stale signed URLs and keeps PDF canvas export working.
+  app.get('/api/notion/blocks/:blockId/image', async (req, res) => {
+    try {
+      const { blockId } = req.params;
+      const blockDetail = await (notion.blocks.retrieve as any)({ block_id: blockId });
+      const imageUrl: string = blockDetail?.image?.file?.url || blockDetail?.image?.external?.url || '';
+      if (!imageUrl) {
+        return res.status(404).json({ success: false, message: 'Imagen no encontrada' });
+      }
+
+      const upstream = await fetch(imageUrl);
+      if (!upstream.ok) {
+        return res.status(502).json({ success: false, message: 'No se pudo descargar la imagen desde Notion' });
+      }
+
+      const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+      const arrayBuffer = await upstream.arrayBuffer();
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', contentType);
+      return res.status(200).send(Buffer.from(arrayBuffer));
+    } catch (e: any) {
+      console.error('Error proxying Notion image:', e);
+      return res.status(500).json({ success: false, message: 'No se pudo cargar la imagen' });
     }
   });
 
@@ -898,12 +916,12 @@ async function startServer() {
       // Update local cache with block ID + fresh URL
       const { settings, projectsConfig } = readDb();
       if (projectsConfig[id]) {
-        projectsConfig[id].bgImage = uploadResult.imageUrl;
+        projectsConfig[id].bgImage = buildBgImageProxyUrl(uploadResult.blockId);
         projectsConfig[id].bgImageBlockId = uploadResult.blockId;
       }
       writeDb(settings, projectsConfig);
 
-      res.json({ success: true, imageUrl: uploadResult.imageUrl, blockId: uploadResult.blockId });
+      res.json({ success: true, imageUrl: buildBgImageProxyUrl(uploadResult.blockId), blockId: uploadResult.blockId });
     } catch (e: any) {
       console.error('Error in upload-bg-image:', e);
       res.status(500).json({ success: false, message: e.message });
