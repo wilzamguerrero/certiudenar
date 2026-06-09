@@ -96,8 +96,14 @@ async function getNotionProjects(): Promise<Array<{ id: string; title: string }>
 async function ensureDbProperties(dbId: string): Promise<void> {
   try {
     const db = await notion.databases.retrieve({ database_id: dbId });
-    const existing = Object.keys((db as any).properties || {});
+    const props = (db as any).properties || {};
+    const existing = Object.keys(props);
     const toAdd: Record<string, any> = {};
+
+    // Rename the title property to "Nombre" if it exists under another name
+    const titleKey = existing.find(k => props[k].type === 'title' && k !== 'Nombre');
+    if (titleKey) toAdd[titleKey] = { name: 'Nombre' };
+
     if (!existing.includes('Identificacion')) toAdd['Identificacion'] = { rich_text: {} };
     if (!existing.includes('Rol')) toAdd['Rol'] = {
       select: { options: [
@@ -118,7 +124,7 @@ async function ensureDbProperties(dbId: string): Promise<void> {
     if (!existing.includes('Enlace Descarga')) toAdd['Enlace Descarga'] = { files: {} };
     if (Object.keys(toAdd).length > 0) {
       await notion.databases.update({ database_id: dbId, properties: toAdd });
-      console.info(`Repaired DB ${dbId}: added properties ${Object.keys(toAdd).join(', ')}`);
+      console.info(`Repaired DB ${dbId}: updated properties ${Object.keys(toAdd).join(', ')}`);
     }
   } catch (e) {
     console.warn(`Could not verify/repair DB ${dbId} properties:`, e);
