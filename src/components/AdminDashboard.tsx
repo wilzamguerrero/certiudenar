@@ -45,6 +45,7 @@ interface AdminDashboardProps {
 }
 
 type TabType = 'registrants' | 'designer' | 'bulk' | 'settings';
+type CertificatePreviewAction = 'view' | 'recertify';
 
 export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('registrants');
@@ -64,6 +65,8 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [previewingCert, setPreviewingCert] = useState<Registrant | null>(null);
+  const [previewAction, setPreviewAction] = useState<CertificatePreviewAction>('view');
+  const [recertifyQueue, setRecertifyQueue] = useState<Registrant[]>([]);
 
   // Designer – fields
   const [projectFields, setProjectFields] = useState<FieldConfig[]>(DEFAULT_FIELDS);
@@ -125,6 +128,12 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     else { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(''), 5000); }
   };
 
+  const closeCertificatePreview = useCallback(() => {
+    setPreviewAction('view');
+    setRecertifyQueue([]);
+    setPreviewingCert(null);
+  }, []);
+
   const fetchProjectsList = async () => {
     setLoading(true);
     try {
@@ -170,6 +179,8 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     if (selectedProjectId && projects.length > 0) {
       fetchProjectRegistrants(selectedProjectId);
       setSelectedIds(new Set());
+      setRecertifyQueue([]);
+      setPreviewingCert(null);
       const activeProject = projects.find(p => p.id === selectedProjectId);
       const migrated = migrateTemplateConfig(activeProject?.config || { bgImage: null, bgAspectRatio: 16 / 9, fields: DEFAULT_FIELDS });
       setSettings((prev: any) => ({
@@ -403,6 +414,60 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
       } else flash(result.message || 'No se pudo actualizar.', true);
     } catch { flash('Error de red.', true); }
   };
+
+  const openCertificatePreview = useCallback((registrant: Registrant, queue: Registrant[] = [], action: CertificatePreviewAction = 'view') => {
+    setPreviewAction(action);
+    setRecertifyQueue(queue);
+    setPreviewingCert(registrant);
+  }, []);
+
+  const handleRecertify = useCallback((registrant: Registrant) => {
+    openCertificatePreview(registrant, [], 'recertify');
+  }, [openCertificatePreview]);
+
+  const handleBulkRecertify = useCallback(() => {
+    const selectedRegistrants = registrants.filter(reg => selectedIds.has(reg.id) && reg.status === 'certificado');
+    if (selectedRegistrants.length === 0) {
+      flash('Selecciona al menos un participante ya certificado para recertificar.', true);
+      return;
+    }
+
+    const [firstRegistrant, ...remainingRegistrants] = selectedRegistrants;
+    openCertificatePreview(firstRegistrant, remainingRegistrants, 'recertify');
+    flash(
+      remainingRegistrants.length > 0
+        ? 'Se abrió la recertificación masiva. Descarga cada PDF para avanzar al siguiente participante.'
+        : 'Se abrió la recertificación del participante seleccionado.'
+    );
+  }, [openCertificatePreview, registrants, selectedIds]);
+
+  const handleCertificateDownloaded = useCallback(() => {
+    if (!previewingCert) return;
+
+    const generatedAt = new Date().toISOString().split('T')[0];
+    const currentRegistrantId = previewingCert.id;
+    const currentRegistrantName = previewingCert.name;
+
+    setRegistrants(prev => prev.map(reg =>
+      reg.id === currentRegistrantId
+        ? { ...reg, status: previewAction === 'recertify' ? 'certificado' : reg.status, generatedAt }
+        : reg
+    ));
+
+    if (recertifyQueue.length > 0) {
+      const [nextRegistrant, ...remainingQueue] = recertifyQueue;
+      setRecertifyQueue(remainingQueue);
+      setPreviewingCert(nextRegistrant);
+      flash(`Certificado actualizado para ${currentRegistrantName}. Sigue con ${nextRegistrant.name}.`);
+      return;
+    }
+
+    setPreviewingCert(prev => prev ? { ...prev, status: previewAction === 'recertify' ? 'certificado' : prev.status, generatedAt } : prev);
+    flash(previewAction === 'recertify'
+      ? 'Certificado recertificado con el diseño actual.'
+      : 'Certificado descargado con el diseño actual.'
+    );
+  }, [previewAction, previewingCert, recertifyQueue]);
 
   const handleSaveEditRegistrant = async (e: FormEvent) => {
     e.preventDefault();
@@ -684,7 +749,7 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
         ] as const).map(tab => (
           <button
             key={tab.key}
-            onClick={() => { setActiveTab(tab.key as TabType); setPreviewingCert(null); }}
+            onClick={() => { setActiveTab(tab.key as TabType); closeCertificatePreview(); }}
             className={`flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 transition-all cursor-pointer ${
               activeTab === tab.key
                 ? 'border-pink-500 text-pink-600 dark:text-pink-400'
@@ -781,6 +846,10 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                           className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm">
                           <Award className="w-3 h-3" /> Certificar seleccionados
                         </button>
+                        <button onClick={handleBulkRecertify}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm">
+                          <RefreshCw className="w-3 h-3" /> Recertificar seleccionados
+                        </button>
                         <button onClick={() => handleBulkUpdate('incorrecto')}
                           className="bg-red-500 hover:bg-red-600 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm">
                           <X className="w-3 h-3" /> Marcar incorrectos
@@ -874,9 +943,18 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                                 </button>
                               )}
                               {reg.status === 'certificado' && (
-                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-200 dark:border-emerald-800/40 px-2 py-1 rounded">
-                                  ✓ Certificado
-                                </span>
+                                <>
+                                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-200 dark:border-emerald-800/40 px-2 py-1 rounded">
+                                    ✓ Certificado
+                                  </span>
+                                  <button
+                                    onClick={() => handleRecertify(reg)}
+                                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-[10px] py-1.5 px-2.5 rounded flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                                    title="Regenerar el certificado con el diseño actual"
+                                  >
+                                    <RefreshCw className="w-3 h-3" /> Recertificar
+                                  </button>
+                                </>
                               )}
                               {reg.status === 'recibido' && (
                                 <button
@@ -893,7 +971,7 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                                 <Pencil className="w-3 h-3 text-pink-500" /> Editar
                               </button>
                               <button
-                                onClick={() => setPreviewingCert(reg)}
+                                onClick={() => openCertificatePreview(reg)}
                                 className="bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 font-semibold text-[10px] py-1.5 px-2.5 rounded flex items-center gap-1 transition-all border border-indigo-100 dark:border-indigo-700/30 cursor-pointer shadow-sm"
                               >
                                 <Eye className="w-3 h-3" /> Ver
@@ -926,8 +1004,11 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                   <Sparkles className="w-4 h-4 text-pink-500" /> Vista Previa
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">{previewingCert.name} — C.C. {previewingCert.identification}</p>
+                {previewAction === 'recertify' && recertifyQueue.length > 0 && (
+                  <p className="text-[10px] text-indigo-500 mt-1 font-semibold">Quedan {recertifyQueue.length} participante(s) pendientes en esta recertificación.</p>
+                )}
               </div>
-              <button onClick={() => setPreviewingCert(null)} className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-3 py-1.5 text-xs font-semibold rounded border border-slate-200 dark:border-slate-700 cursor-pointer">
+              <button onClick={closeCertificatePreview} className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-3 py-1.5 text-xs font-semibold rounded border border-slate-200 dark:border-slate-700 cursor-pointer">
                 Cerrar
               </button>
             </div>
@@ -937,6 +1018,8 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                 identification={previewingCert.identification}
                 role={previewingCert.role}
                 id={previewingCert.id}
+                pageId={previewingCert.id}
+                onDownloaded={handleCertificateDownloaded}
                 templateConfig={settings.template}
               />
             </div>

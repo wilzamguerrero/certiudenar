@@ -678,7 +678,7 @@ export default function App() {
                     <span>💡 ¿Qué pasará ahora?</span>
                   </p>
                   <ol className="list-decimal pl-4.5 space-y-1 text-on-surface-variant font-medium">
-                    <li>La coordinación revisará tu solicitud en Notion.</li>
+                    <li>La coordinación revisará tu solicitud.</li>
                     <li>Cuando sea aprobada, el estado cambiará a <strong className="text-primary">certificado</strong>.</li>
                     <li>Vuelve a esta sección <strong className="text-primary">"Descargar Certificado"</strong> e ingresa tu documento para obtenerlo.</li>
                   </ol>
