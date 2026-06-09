@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #342597;
+  --color-primary-container: #4c40af;
+  --color-on-primary: #ffffff;
+  --color-background: #fcf8ff;
+  --color-on-background: #1a1a2e;
+  --color-surface: #fcf8ff;
+  --color-on-surface: #1a1a2e;
+  --color-surface-container: #efecff;
+  --color-surface-container-low: #f5f2ff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-high: #e8e5ff;
+  --color-surface-container-highest: #e2e0fc;
+  --color-surface-dim: #dad7f3;
+  --color-surface-bright: #fcf8ff;
+  --color-secondary: #7c5800;
+  --color-secondary-container: #feb700;
+  --color-on-secondary-container: #6b4b00;
+  --color-on-secondary-fixed: #271900;
+  --color-secondary-fixed: #ffdea8;
+  --color-secondary-fixed-dim: #ffba20;
+  --color-outline: #787584;
+  --color-outline-variant: #c8c4d5;
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+  --color-tertiary: #780039;
+  --color-tertiary-container: #9a1d50;
+
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-on-background);
+}
+
+:root.dark {
+  --color-background: #0d0821;
+  --color-on-background: #f1ecff;
+  --color-surface: #150f33;
+  --color-on-surface: #fcf8ff;
+  --color-surface-container: #201a47;
+  --color-surface-container-low: #17123a;
+  --color-surface-container-lowest: #0e0a29;
+  --color-surface-container-high: #2a2356;
+  --color-surface-container-highest: #332b66;
+  --color-surface-dim: #100b29;
+  --color-surface-bright: #2a2356;
+  --color-outline: #89859f;
+  --color-outline-variant: #3a3356;
+  --color-primary: #ada7ff;
+  --color-primary-container: #3d31a5;
+  --color-on-primary: #150066;
+  --color-secondary: #ffb71c;
+  --color-secondary-container: #ffa600;
+  --color-on-secondary-container: #3d2500;
+  --color-secondary-fixed: #ffdca1;
+  --color-on-secondary-fixed: #251600;
+}
+
+/* Light theme support for Admin Dashboard */
+
+.hero-pattern {
+  background-color: #fcf8ff;
+  background-image: radial-gradient(#4c40af 0.5px, transparent 0.5px), radial-gradient(#4c40af 0.5px, #fcf8ff 0.5px);
+  background-size: 20px 20px;
+  background-position: 0 0, 10px 10px;
+  opacity: 0.05;
+}

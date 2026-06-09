@@ -1,0 +1,6 @@
+{
+  "name": "Generador de Certificados",
+  "description": "Plataforma de generación, firma digital y envío de certificados para el Taller con Empresarios y Egresados de la Facultad de Artes de la Universidad de Nariño.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
