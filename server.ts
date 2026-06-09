@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -10,9 +11,13 @@ import { createServer as createViteServer } from 'vite';
 import { AdminSettings } from './src/types.js';
 import { Client } from '@notionhq/client';
 
-// ─── Notion Credentials ───────────────────────────────────────────────────────
-const NOTION_SECRET = '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';
-const PARENT_PAGE_ID = '3794342425258020a1c5c133e287cb84';
+// ─── Notion Credentials (loaded from .env) ────────────────────────────────────
+const NOTION_SECRET = process.env.NOTION_SECRET || '';
+const PARENT_PAGE_ID = process.env.PARENT_PAGE_ID || '';
+
+if (!NOTION_SECRET || !PARENT_PAGE_ID) {
+  console.error('⚠️  Missing NOTION_SECRET or PARENT_PAGE_ID in environment variables.');
+}
 
 const notion = new Client({ auth: NOTION_SECRET }) as any;
 
@@ -147,7 +152,11 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
       if (storedId) { await ensureDbProperties(storedId); return storedId; }
     }
 
-    // 2. Check for existing child_page inside toggle that contains the DB
+    // 2. Check for inline child_database directly inside the toggle
+    const inlineDb = results.find((b: any) => b.type === 'child_database');
+    if (inlineDb) { await ensureDbProperties(inlineDb.id); return inlineDb.id; }
+
+    // 3. Check for child_page inside toggle that contains the DB
     const childPage = results.find((b: any) => b.type === 'child_page');
     if (childPage) {
       try {
@@ -157,7 +166,7 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
       } catch {}
     }
 
-    // 3. Check if a child_database with matching name exists under parent page (fallback)
+    // 4. Check at parent page level (legacy fallback for old projects)
     const parentChildren = await notion.blocks.children.list({ block_id: PARENT_PAGE_ID });
     const matchingDb = (parentChildren.results || []).find((b: any) => {
       if (b.type !== 'child_database') return false;
@@ -166,33 +175,29 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
     });
     if (matchingDb) { await ensureDbProperties(matchingDb.id); return matchingDb.id; }
 
-    // 4. Determine where to create the DB
-    // Try to create a child_page inside the toggle for clean structure
-    let dbParentPageId: string = PARENT_PAGE_ID;
-    if (!childPage) {
-      try {
-        const pageResp = await (notion.blocks.children.append as any)({
-          block_id: toggleBlockId,
-          children: [{
-            object: 'block',
-            type: 'child_page',
-            child_page: { title: `📋 Participantes — ${projectTitle}` }
-          }]
-        });
-        if (pageResp.results?.[0]?.id) {
-          dbParentPageId = pageResp.results[0].id;
-        }
-      } catch {
-        console.info('child_page inside toggle not supported, using parent page');
-        dbParentPageId = PARENT_PAGE_ID;
+    // 5. Try to create an inline database INSIDE the toggle block
+    let dbId: string | null = null;
+    try {
+      const dbAppendResp = await (notion.blocks.children.append as any)({
+        block_id: toggleBlockId,
+        children: [{
+          object: 'block',
+          type: 'child_database',
+          child_database: { title: `Participantes - ${projectTitle}` }
+        }]
+      });
+      dbId = dbAppendResp.results?.[0]?.id || null;
+      if (dbId) {
+        await ensureDbProperties(dbId);
+        return dbId;
       }
-    } else {
-      dbParentPageId = childPage.id;
+    } catch (inlineErr) {
+      console.warn('Inline child_database in toggle not supported, falling back to page level:', inlineErr);
     }
 
-    // 5. Create the database
+    // 6. Final fallback: create database at parent page level + store __DB_ID__ reference
     const db = await notion.databases.create({
-      parent: { type: 'page_id', page_id: dbParentPageId },
+      parent: { type: 'page_id', page_id: PARENT_PAGE_ID },
       is_inline: true,
       title: [{ type: 'text', text: { content: `Participantes - ${projectTitle}` } }],
       properties: {
@@ -222,43 +227,37 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
       }
     });
 
-    const dbId: string = db.id;
+    dbId = db.id;
 
-    // 6. If DB was placed at root level, add reference inside toggle for navigation
-    if (dbParentPageId === PARENT_PAGE_ID) {
-      try {
-        await notion.blocks.children.append({
-          block_id: toggleBlockId,
-          children: [
-            {
-              object: 'block', type: 'heading_3',
-              heading_3: { rich_text: [{ type: 'text', text: { content: '📋 Base de Datos de Participantes' } }] }
-            },
-            {
-              object: 'block', type: 'paragraph',
-              paragraph: {
-                rich_text: [{
-                  type: 'text',
-                  text: {
-                    content: `→ Ver tabla: Participantes - ${projectTitle}`,
-                    link: { url: `https://www.notion.so/${dbId.replace(/-/g, '')}` }
-                  }
-                }]
-              }
-            },
-            {
-              object: 'block', type: 'code',
-              code: {
-                caption: [{ type: 'text', text: { content: '__DB_ID__' } }],
-                rich_text: [{ type: 'text', text: { content: dbId } }],
-                language: 'javascript'
-              }
+    // Store DB reference inside toggle for future lookups
+    try {
+      await (notion.blocks.children.append as any)({
+        block_id: toggleBlockId,
+        children: [
+          {
+            object: 'block', type: 'paragraph',
+            paragraph: {
+              rich_text: [{
+                type: 'text',
+                text: {
+                  content: `📋 Tabla de participantes: Participantes - ${projectTitle}`,
+                  link: { url: `https://www.notion.so/${dbId.replace(/-/g, '')}` }
+                }
+              }]
             }
-          ]
-        });
-      } catch (appendErr) {
-        console.warn('Could not append DB reference to toggle:', appendErr);
-      }
+          },
+          {
+            object: 'block', type: 'code',
+            code: {
+              caption: [{ type: 'text', text: { content: '__DB_ID__' } }],
+              rich_text: [{ type: 'text', text: { content: dbId } }],
+              language: 'javascript'
+            }
+          }
+        ]
+      });
+    } catch (appendErr) {
+      console.warn('Could not append DB reference to toggle:', appendErr);
     }
 
     return dbId;
@@ -736,6 +735,20 @@ async function startServer() {
       }
       await notion.pages.update({ page_id: pageId, properties: props });
       res.json({ success: true, message: 'Certificado marcado como generado' });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // DELETE project toggle from Notion
+  app.delete('/api/notion/projects/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      await notion.blocks.delete({ block_id: id });
+      const { settings, projectsConfig } = readDb();
+      delete projectsConfig[id];
+      writeDb(settings, projectsConfig);
+      res.json({ success: true, message: 'Proyecto eliminado de Notion' });
     } catch (e: any) {
       res.status(500).json({ success: false, message: e.message });
     }

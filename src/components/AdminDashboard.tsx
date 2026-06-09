@@ -238,6 +238,25 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
   }, []);
 
+  const handleDeleteProject = async () => {
+    if (!selectedProjectId) { flash('No hay proyecto activo para eliminar.', true); return; }
+    const currentProj = projects.find(p => p.id === selectedProjectId);
+    if (!window.confirm(`¿Eliminar el proyecto "${currentProj?.title || 'este proyecto'}" de Notion?\n\nSe eliminará el toggle y su configuración. Los datos de participantes en la tabla NO se borran de Notion automáticamente.\n\nEsta acción no se puede deshacer.`)) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/notion/projects/${selectedProjectId}`, { method: 'DELETE' });
+      const d = await res.json();
+      if (d.success) {
+        flash('Proyecto eliminado de Notion.');
+        const remaining = projects.filter(p => p.id !== selectedProjectId);
+        setProjects(remaining);
+        setSelectedProjectId(remaining.length > 0 ? remaining[0].id : '');
+        setRegistrants([]);
+      } else flash(d.message || 'No se pudo eliminar el proyecto.', true);
+    } catch { flash('Error de conexión al eliminar.', true); }
+    finally { setLoading(false); }
+  };
+
   const handleCreateProject = async (e: FormEvent) => {
     e.preventDefault();
     if (!newProjectTitle.trim()) return;
@@ -534,6 +553,9 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
           <button onClick={() => setShowCreateProjectModal(true)} className="text-pink-500 hover:text-pink-700 transition-colors" title="Crear proyecto">
             <Plus className="w-4 h-4" />
           </button>
+          <button onClick={handleDeleteProject} className="text-slate-400 hover:text-red-500 transition-colors" title="Eliminar proyecto activo">
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -807,7 +829,7 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                 Cerrar
               </button>
             </div>
-            <div className="bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800 p-4 flex justify-center">
+            <div className="bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800 p-4">
               <CertificateTemplate
                 name={previewingCert.name}
                 identification={previewingCert.identification}

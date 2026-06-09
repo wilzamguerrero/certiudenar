@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { Download, Check, RefreshCw } from 'lucide-react';
+import jsPDF from 'jspdf';
 import { TemplateConfig, FieldConfig, DEFAULT_FIELDS, migrateTemplateConfig } from '../types.js';
 
 interface CertificateProps {
@@ -79,13 +80,20 @@ export default function CertificateTemplate({
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(image, 0, 0, DL_W, DL_H);
-          const pngUrl = canvas.toDataURL('image/png');
-          const a = document.createElement('a');
-          a.href = pngUrl;
-          a.download = `Certificado_${name.replace(/\s+/g, '_')}.png`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+
+          // Convert to PDF using jsPDF — A4 landscape, preserve aspect ratio
+          const pxToMm = 25.4 / 96;
+          const pdfW = Math.round(DL_W * pxToMm * 10) / 10;
+          const pdfH = Math.round(DL_H * pxToMm * 10) / 10;
+          const pdf = new jsPDF({
+            orientation: pdfW > pdfH ? 'l' : 'p',
+            unit: 'mm',
+            format: [pdfW, pdfH],
+          });
+          const imgData = canvas.toDataURL('image/jpeg', 0.95);
+          pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+          pdf.save(`Certificado_${name.replace(/\s+/g, '_')}.pdf`);
+
           if (pageId) {
             const downloadUrl = `${window.location.origin}/?view=download&id=${identification}`;
             fetch('/api/notion/registrants/mark-generated', {
@@ -111,7 +119,7 @@ export default function CertificateTemplate({
 
   return (
     <div className="flex flex-col items-center gap-4 w-full" id={`cert-tmpl-${id}`}>
-      <div className="w-full max-w-3xl shadow-2xl rounded-xl overflow-hidden bg-slate-900 border border-slate-700 select-none"
+      <div className="w-full shadow-2xl rounded-xl overflow-hidden bg-slate-900 border border-slate-700 select-none"
         style={{ aspectRatio: String(activeTemplate?.bgAspectRatio ?? (16 / 9)) }}>
         <svg
           ref={svgRef}
@@ -152,16 +160,16 @@ export default function CertificateTemplate({
         </svg>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex gap-4 w-full justify-center">
         <button
           onClick={handleDownload}
           disabled={downloading}
           id="btn-download-cert"
-          className="flex items-center gap-2 bg-gradient-to-r from-pink-600 to-violet-600 hover:from-pink-700 hover:to-violet-700 text-white font-semibold py-3 px-6 rounded-lg shadow-lg hover:shadow-xl transition-all disabled:opacity-70 disabled:cursor-not-allowed text-sm md:text-base cursor-pointer"
+          className="flex items-center gap-2 bg-gradient-to-r from-pink-600 to-violet-600 hover:from-pink-700 hover:to-violet-700 text-white font-semibold py-3 px-6 rounded-lg shadow-lg hover:shadow-xl transition-all disabled:opacity-70 disabled:cursor-not-allowed text-sm cursor-pointer"
         >
           {downloading ? <><RefreshCw className="w-5 h-5 animate-spin" /> Generando...</>
             : downloaded ? <><Check className="w-5 h-5 text-emerald-300" /> ¡Descargado!</>
-            : <><Download className="w-5 h-5" /> Descargar Certificado PNG ({DL_W}×{DL_H})</>}
+            : <><Download className="w-5 h-5" /> Descargar Certificado PDF</>}
         </button>
       </div>
     </div>

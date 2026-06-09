@@ -717,7 +717,7 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.3 }}
-                className="w-full max-w-2xl bg-surface-container-lowest p-6 md:p-8 rounded-2xl border border-outline-variant shadow-sm space-y-6"
+                className="w-full max-w-4xl bg-surface-container-lowest p-4 md:p-8 rounded-2xl border border-outline-variant shadow-sm space-y-6"
               >
                 <div className="text-center space-y-1 max-w-md mx-auto">
                   <div className="inline-flex p-3 rounded-full bg-primary/10 border border-primary/20 text-primary mb-1">
@@ -813,7 +813,7 @@ export default function App() {
                         </div>
  
                         {/* RENDER DIGITAL CERTIFICATE BOX WITH PROJECT-SPECIFIC DESIGN */}
-                        <div className="flex justify-center border border-outline-variant/60 p-2 md:p-4 bg-surface-container rounded-xl shadow-inner">
+                        <div className="w-full border border-outline-variant/60 p-2 md:p-3 bg-surface-container rounded-xl shadow-inner">
                           <CertificateTemplate
                             name={matchingRegistrant.name}
                             identification={matchingRegistrant.identification}
