@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, FormEvent } from 'react';
+import React, { useState, useEffect, useRef, useCallback, FormEvent } from 'react';
 import {
   Users,
   Settings as SettingsIcon,
@@ -24,14 +24,17 @@ import {
   Plus,
   Pencil,
   UserPlus,
-  ChevronDown,
   Award,
   Clock,
   AlertTriangle,
   Download,
-  ExternalLink
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Move,
+  LayoutTemplate
 } from 'lucide-react';
-import { Registrant } from '../types.js';
+import { Registrant, FieldConfig, DEFAULT_FIELDS, migrateTemplateConfig } from '../types.js';
 import CertificateTemplate from './CertificateTemplate.tsx';
 
 interface AdminDashboardProps {
@@ -51,12 +54,7 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
   const [registrants, setRegistrants] = useState<Registrant[]>([]);
   const [settings, setSettings] = useState<any>({
     dailyCode: 'DISENO26',
-    template: {
-      bgImage: null,
-      nameField: { x: 22.5, y: 61.9, fontSize: 32, color: '#1e1b4b', fontWeight: 'bold', enabled: true, align: 'center' },
-      idField: { x: 23.1, y: 68.4, fontSize: 18, color: '#1f2937', fontWeight: 'normal', enabled: true, align: 'center' },
-      roleField: { x: 22.5, y: 73.3, fontSize: 15, color: '#4b5563', fontWeight: 'bold', enabled: true, align: 'center' }
-    }
+    template: { bgImage: null, bgAspectRatio: 16 / 9 }
   });
 
   // UI
@@ -66,10 +64,20 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
   const [successMsg, setSuccessMsg] = useState('');
   const [previewingCert, setPreviewingCert] = useState<Registrant | null>(null);
 
-  // Designer
-  const [activeFieldKey, setActiveFieldKey] = useState<'nameField' | 'idField' | 'roleField'>('nameField');
-  const [isDragging, setIsDragging] = useState(false);
+  // Designer – fields
+  const [projectFields, setProjectFields] = useState<FieldConfig[]>(DEFAULT_FIELDS);
+  const [activeFieldId, setActiveFieldId] = useState<string>('nameField');
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [canvasPxWidth, setCanvasPxWidth] = useState(600);
+
+  // Refs for smooth drag/resize (no setState during pointermove)
+  const fieldElemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const dragRef = useRef<{ fieldId: string; startCX: number; startCY: number; startFX: number; startFY: number; lastX: number; lastY: number } | null>(null);
+  const resizeRef = useRef<{ fieldId: string; handle: 'right' | 'bottom' | 'corner'; startCX: number; startCY: number; startW: number; startH: number; lastW: number; lastH: number } | null>(null);
+
+  // Custom fields in settings
+  const [newFieldLabel, setNewFieldLabel] = useState('');
+  const [newFieldDataKey, setNewFieldDataKey] = useState<'name' | 'identification' | 'role' | 'custom'>('custom');
 
   // Bulk
   const [csvText, setCsvText] = useState('');
@@ -159,7 +167,10 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
       setSelectedIds(new Set());
       const activeProject = projects.find(p => p.id === selectedProjectId);
       if (activeProject?.config) {
-        setSettings((prev: any) => ({ ...prev, template: activeProject.config }));
+        const migrated = migrateTemplateConfig(activeProject.config);
+        setSettings((prev: any) => ({ ...prev, template: { bgImage: migrated.bgImage, bgAspectRatio: migrated.bgAspectRatio ?? (16 / 9) } }));
+        setProjectFields(migrated.fields.length > 0 ? migrated.fields : DEFAULT_FIELDS);
+        setActiveFieldId(migrated.fields[0]?.id ?? 'nameField');
         if (Array.isArray(activeProject.config.roles) && activeProject.config.roles.length > 0) {
           setProjectRoles(activeProject.config.roles);
         } else {
@@ -168,6 +179,60 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
       }
     }
   }, [selectedProjectId, projects]);
+
+  // Canvas pixel width for preview scale
+  useEffect(() => {
+    const update = () => { if (canvasRef.current) setCanvasPxWidth(canvasRef.current.offsetWidth); };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  // Window-level pointer events for smooth drag/resize (no React re-renders during move)
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      if (dragRef.current) {
+        const dx = ((e.clientX - dragRef.current.startCX) / rect.width) * 100;
+        const dy = ((e.clientY - dragRef.current.startCY) / rect.height) * 100;
+        const nx = Math.max(0, Math.min(100, dragRef.current.startFX + dx));
+        const ny = Math.max(0, Math.min(100, dragRef.current.startFY + dy));
+        dragRef.current.lastX = nx;
+        dragRef.current.lastY = ny;
+        const el = fieldElemRefs.current.get(dragRef.current.fieldId);
+        if (el) { el.style.left = `${nx}%`; el.style.top = `${ny}%`; }
+      }
+      if (resizeRef.current) {
+        const dx = ((e.clientX - resizeRef.current.startCX) / rect.width) * 100;
+        const dy = ((e.clientY - resizeRef.current.startCY) / rect.height) * 100;
+        const el = fieldElemRefs.current.get(resizeRef.current.fieldId);
+        let nW = resizeRef.current.startW;
+        let nH = resizeRef.current.startH;
+        if (resizeRef.current.handle !== 'bottom') { nW = Math.max(4, Math.min(95, resizeRef.current.startW + dx)); resizeRef.current.lastW = nW; }
+        if (resizeRef.current.handle !== 'right') { nH = Math.max(2, Math.min(50, resizeRef.current.startH + dy)); resizeRef.current.lastH = nH; }
+        if (el) { el.style.width = `${nW}%`; el.style.height = `${nH}%`; }
+      }
+    };
+    const onUp = () => {
+      if (dragRef.current) {
+        const { fieldId, lastX, lastY } = dragRef.current;
+        setProjectFields(prev => prev.map(f => f.id === fieldId ? { ...f, x: Math.round(lastX * 10) / 10, y: Math.round(lastY * 10) / 10 } : f));
+        dragRef.current = null;
+      }
+      if (resizeRef.current) {
+        const { fieldId, lastW, lastH, handle } = resizeRef.current;
+        const upd: Partial<FieldConfig> = {};
+        if (handle !== 'bottom') upd.width = Math.round(lastW * 10) / 10;
+        if (handle !== 'right') upd.height = Math.round(lastH * 10) / 10;
+        setProjectFields(prev => prev.map(f => f.id === fieldId ? { ...f, ...upd } : f));
+        resizeRef.current = null;
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+  }, []);
 
   const handleCreateProject = async (e: FormEvent) => {
     e.preventDefault();
@@ -202,7 +267,16 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     if (!selectedProjectId) return;
     setSavingSettings(true);
     try {
-      const configToSave = { ...settings.template, roles: projectRoles };
+      const configToSave = {
+        bgImage: settings.template.bgImage,
+        bgAspectRatio: settings.template.bgAspectRatio ?? (16 / 9),
+        fields: projectFields,
+        roles: projectRoles,
+        // Legacy backward compat
+        nameField: projectFields.find(f => f.id === 'nameField') ?? DEFAULT_FIELDS[0],
+        idField: projectFields.find(f => f.id === 'idField') ?? DEFAULT_FIELDS[1],
+        roleField: projectFields.find(f => f.id === 'roleField') ?? DEFAULT_FIELDS[2],
+      };
       const res = await fetch(`/api/notion/projects/${selectedProjectId}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -321,7 +395,16 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     if (!file) return;
     if (file.size > 15 * 1024 * 1024) { alert('Archivo demasiado grande. Máximo 15MB.'); return; }
     const reader = new FileReader();
-    reader.onload = (ev: any) => setSettings((prev: any) => ({ ...prev, template: { ...prev.template, bgImage: ev.target.result } }));
+    reader.onload = (ev: any) => {
+      const dataUrl = ev.target.result as string;
+      // Detect aspect ratio from image
+      const img = new Image();
+      img.onload = () => {
+        const ar = img.width / img.height;
+        setSettings((prev: any) => ({ ...prev, template: { ...prev.template, bgImage: dataUrl, bgAspectRatio: ar } }));
+      };
+      img.src = dataUrl;
+    };
     reader.readAsDataURL(file);
   };
 
@@ -346,39 +429,9 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     flash(`${done} participante(s) actualizados a "${status === 'certificado' ? 'Certificado' : status === 'incorrecto' ? 'Incorrecto' : 'Recibido'}".`);
   };
 
-  const updateFieldProperty = (fieldKey: 'nameField' | 'idField' | 'roleField', property: string, value: any) => {
-    setSettings((prev: any) => ({ ...prev, template: { ...prev.template, [fieldKey]: { ...prev.template[fieldKey], [property]: value } } }));
-  };
-
-  const calculateCoordinates = (clientX: number, clientY: number) => {
-    if (!canvasRef.current) return null;
-    const rect = canvasRef.current.getBoundingClientRect();
-    return {
-      x: Math.round(Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100)) * 10) / 10,
-      y: Math.round(Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100)) * 10) / 10
-    };
-  };
-
-  const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (isDragging) return;
-    const coords = calculateCoordinates(e.clientX, e.clientY);
-    if (coords) { updateFieldProperty(activeFieldKey, 'x', coords.x); updateFieldProperty(activeFieldKey, 'y', coords.y); }
-  };
-
-  const handlePointerDown = (fieldKey: 'nameField' | 'idField' | 'roleField', e: React.PointerEvent) => {
-    e.stopPropagation(); setActiveFieldKey(fieldKey); setIsDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging) return;
-    const coords = calculateCoordinates(e.clientX, e.clientY);
-    if (coords) { updateFieldProperty(activeFieldKey, 'x', coords.x); updateFieldProperty(activeFieldKey, 'y', coords.y); }
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (isDragging) { setIsDragging(false); e.currentTarget.releasePointerCapture(e.pointerId); }
-  };
+  const updateProjectField = useCallback((fieldId: string, updates: Partial<FieldConfig>) => {
+    setProjectFields(prev => prev.map(f => f.id === fieldId ? { ...f, ...updates } : f));
+  }, []);
 
   // CSV parsing
   const parseCsvString = (text: string) => {
@@ -758,206 +811,306 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
         )}
 
         {/* ════ TAB: DESIGNER ════════════════════════════════════════════ */}
-        {activeTab === 'designer' && (
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+        {activeTab === 'designer' && (() => {
+          const activeField = projectFields.find(f => f.id === activeFieldId) ?? projectFields[0];
+          const ar = settings.template?.bgAspectRatio ?? (16 / 9);
+          const svgW = 1200;
+          const svgH = Math.round(svgW / ar);
+          const scale = canvasPxWidth / svgW;
 
-            {/* Controls panel */}
-            <div className="xl:col-span-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 space-y-5 shadow-sm h-fit">
-              <div>
-                <h2 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
-                  <Layers className="w-4 h-4 text-pink-500" /> Diseño del Certificado
-                </h2>
-                <p className="text-xs text-slate-400 mt-1">Sube el fondo, selecciona un campo y arrástralo sobre el canvas.</p>
-              </div>
+          const previewText = (f: FieldConfig) => {
+            if (f.dataKey === 'name') return 'NOMBRE COMPLETO';
+            if (f.dataKey === 'identification') return 'C.C. 1.085.XXX.XXX';
+            if (f.dataKey === 'role') return 'ROL / CARGO';
+            return (f.staticValue || f.label || 'TEXTO FIJO').toUpperCase();
+          };
 
-              {/* BG Upload */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Imagen de Fondo</label>
-                {!settings.template?.bgImage ? (
-                  <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-pink-500 rounded-xl p-6 text-center transition-all bg-slate-50 dark:bg-slate-950/40">
-                    <input type="file" accept="image/*" id="bg-upload-field" className="hidden" onChange={handleLogoUpload} />
-                    <label htmlFor="bg-upload-field" className="cursor-pointer flex flex-col items-center gap-1.5">
-                      <Upload className="w-8 h-8 text-pink-500" />
-                      <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">Elegir PNG o JPG</span>
-                      <span className="text-[10px] text-slate-400">HD recomendado (1920×1080)</span>
-                    </label>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl">
-                    <div className="flex items-center gap-2">
-                      <img src={settings.template.bgImage} className="w-12 h-12 object-cover rounded border border-slate-300 dark:border-slate-700" alt="fondo" />
-                      <div>
-                        <span className="text-xs font-bold text-slate-800 dark:text-white block">Fondo activo</span>
-                        <span className="text-[10px] text-emerald-500 font-mono">Base64</span>
-                      </div>
-                    </div>
-                    <button onClick={() => setSettings((p: any) => ({ ...p, template: { ...p.template, bgImage: null } }))}
-                      className="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
-                      Remover
-                    </button>
-                  </div>
-                )}
-              </div>
+          const dataKeyColors: Record<string, string> = {
+            name: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400',
+            identification: 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400',
+            role: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',
+            custom: 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300',
+          };
 
-              {/* Field selector */}
-              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Campo activo</label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {([
-                    { key: 'nameField', label: 'Nombre' },
-                    { key: 'idField', label: 'Cédula' },
-                    { key: 'roleField', label: 'Rol' }
-                  ] as const).map(f => (
-                    <button
-                      key={f.key}
-                      type="button"
-                      onClick={() => setActiveFieldKey(f.key)}
-                      className={`py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer text-center ${
-                        activeFieldKey === f.key
-                          ? 'bg-pink-50 dark:bg-pink-900/20 border-pink-500 text-pink-600 dark:text-pink-300'
-                          : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900'
-                      }`}
-                    >{f.label}</button>
-                  ))}
+          return (
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+              {/* ── Controls panel ── */}
+              <div className="xl:col-span-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-sm h-fit">
+                <div>
+                  <h2 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-pink-500" /> Diseñador
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">Arrastra campos o usa los controles. Escala con los handles de borde/esquina.</p>
                 </div>
-              </div>
 
-              {/* Sliders & props */}
-              <div className="space-y-4 p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-pink-600 dark:text-pink-400">
-                    {activeFieldKey === 'nameField' ? 'Nombre' : activeFieldKey === 'idField' ? 'Cédula/ID' : 'Rol'}
-                  </span>
-                  <label className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold cursor-pointer">
-                    <input type="checkbox" checked={settings.template[activeFieldKey]?.enabled}
-                      onChange={e => updateFieldProperty(activeFieldKey, 'enabled', e.target.checked)} />
-                    Habilitado
-                  </label>
-                </div>
-                <div className="space-y-3 text-xs">
-                  {[
-                    { label: 'Posición X', prop: 'x', max: 100, step: 0.5 },
-                    { label: 'Posición Y', prop: 'y', max: 100, step: 0.5 }
-                  ].map(sl => (
-                    <div key={sl.prop} className="space-y-1">
-                      <div className="flex justify-between text-[10px] text-slate-500">
-                        <span>{sl.label} (%)</span>
-                        <span className="font-mono text-pink-500 font-bold">{settings.template[activeFieldKey]?.[sl.prop]}%</span>
+                {/* BG Upload */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Imagen de Fondo</label>
+                  {!settings.template?.bgImage ? (
+                    <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-pink-500 rounded-xl p-5 text-center transition-all bg-slate-50 dark:bg-slate-950/40">
+                      <input type="file" accept="image/*" id="bg-upload-field" className="hidden" onChange={handleLogoUpload} />
+                      <label htmlFor="bg-upload-field" className="cursor-pointer flex flex-col items-center gap-1.5">
+                        <Upload className="w-7 h-7 text-pink-500" />
+                        <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">Elegir PNG o JPG</span>
+                        <span className="text-[10px] text-slate-400">El canvas se ajustará al tamaño de la imagen</span>
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl">
+                      <div className="flex items-center gap-2">
+                        <img src={settings.template.bgImage} className="w-12 h-8 object-cover rounded border border-slate-300 dark:border-slate-700" alt="fondo" />
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 dark:text-white block">Fondo activo</span>
+                          <span className="text-[10px] text-emerald-500 font-mono">{ar.toFixed(2)}:1</span>
+                        </div>
                       </div>
-                      <input type="range" min="0" max={sl.max} step={sl.step}
-                        value={settings.template[activeFieldKey]?.[sl.prop] || 50}
-                        onChange={e => updateFieldProperty(activeFieldKey, sl.prop, parseFloat(e.target.value))}
-                        className="w-full accent-pink-500 cursor-pointer" />
-                    </div>
-                  ))}
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <div>
-                      <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Fuente (pt)</label>
-                      <input type="number" value={settings.template[activeFieldKey]?.fontSize || 20}
-                        onChange={e => updateFieldProperty(activeFieldKey, 'fontSize', parseInt(e.target.value) || 12)}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded font-mono text-xs px-2.5 py-1.5 focus:ring-1 focus:ring-pink-500 focus:outline-none text-slate-900 dark:text-white" />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Color</label>
-                      <div className="flex gap-1.5">
-                        <input type="color" value={settings.template[activeFieldKey]?.color || '#000000'}
-                          onChange={e => updateFieldProperty(activeFieldKey, 'color', e.target.value)}
-                          className="w-8 h-8 border-0 bg-transparent cursor-pointer rounded" />
-                        <input type="text" value={settings.template[activeFieldKey]?.color || ''}
-                          onChange={e => updateFieldProperty(activeFieldKey, 'color', e.target.value)}
-                          className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded font-mono text-[10px] uppercase px-1.5 py-1 focus:ring-1 focus:ring-pink-500 focus:outline-none text-slate-900 dark:text-white" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Grosor</label>
-                      <select value={settings.template[activeFieldKey]?.fontWeight || 'normal'}
-                        onChange={e => updateFieldProperty(activeFieldKey, 'fontWeight', e.target.value)}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-xs px-2 py-1.5 text-slate-800 dark:text-slate-300 focus:ring-1 focus:ring-pink-500 focus:outline-none">
-                        <option value="normal">Normal</option>
-                        <option value="bold">Negrita</option>
-                        <option value="bolder">Gruesa</option>
-                        <option value="black">Negra</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Alineación</label>
-                      <select value={settings.template[activeFieldKey]?.align || 'center'}
-                        onChange={e => updateFieldProperty(activeFieldKey, 'align', e.target.value)}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-xs px-2 py-1.5 text-slate-800 dark:text-slate-300 focus:ring-1 focus:ring-pink-500 focus:outline-none">
-                        <option value="center">Centro</option>
-                        <option value="left">Izquierda</option>
-                        <option value="right">Derecha</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <button onClick={handleSaveSettings} disabled={savingSettings}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs py-3 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow cursor-pointer uppercase tracking-wider disabled:opacity-50">
-                {savingSettings ? <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</> : <><Check className="w-4 h-4" /> Guardar Diseño</>}
-              </button>
-            </div>
-
-            {/* Canvas preview */}
-            <div className="xl:col-span-8 flex flex-col gap-3">
-              <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-2.5 flex items-center gap-2 text-xs shadow-sm">
-                <span className="w-2 h-2 rounded-full bg-pink-500 shrink-0" />
-                <span className="text-slate-500 dark:text-slate-400">
-                  Haz clic en el canvas o arrastra los campos. Campo activo: <strong className="text-pink-500">{activeFieldKey === 'nameField' ? '[Nombre]' : activeFieldKey === 'idField' ? '[Cédula]' : '[Rol]'}</strong>
-                </span>
-              </div>
-
-              <div className="bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xl">
-                <div
-                  ref={canvasRef}
-                  onClick={handleCanvasClick}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  className="w-full aspect-[16/9] relative select-none cursor-crosshair overflow-hidden touch-none"
-                  style={{
-                    backgroundImage: settings.template?.bgImage ? `url(${settings.template.bgImage})` : 'none',
-                    backgroundSize: '100% 100%',
-                    backgroundPosition: 'center',
-                    backgroundColor: darkMode ? '#0c071a' : '#f8f5ff'
-                  }}
-                >
-                  {!settings.template?.bgImage && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-25">
-                      <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle, #db2777 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
-                      <Maximize2 className="w-10 h-10 text-slate-400 mb-2" />
-                      <p className="text-xs font-bold font-mono tracking-widest text-slate-500 uppercase">Canvas del Certificado</p>
+                      <button onClick={() => setSettings((p: any) => ({ ...p, template: { ...p.template, bgImage: null, bgAspectRatio: 16 / 9 } }))}
+                        className="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+                        Remover
+                      </button>
                     </div>
                   )}
+                </div>
 
-                  {(['nameField', 'idField', 'roleField'] as const).map(fk => {
-                    const field = settings.template?.[fk];
-                    if (!field?.enabled) return null;
-                    const colors = { nameField: ['border-pink-500', 'bg-pink-500/20', 'border-indigo-300', 'bg-indigo-50 dark:bg-indigo-900/40'], idField: ['border-pink-500', 'bg-pink-500/20', 'border-violet-300', 'bg-violet-50 dark:bg-violet-900/40'], roleField: ['border-pink-500', 'bg-pink-500/20', 'border-amber-300', 'bg-amber-50 dark:bg-amber-900/40'] };
-                    const [aB, aBg, nB, nBg] = colors[fk];
-                    const isActive = activeFieldKey === fk;
-                    const label = fk === 'nameField' ? 'NOMBRE COMPLETO' : fk === 'idField' ? 'C.C. 1.085.XXX.XXX' : 'ROL / CARGO';
-                    return (
-                      <div
-                        key={fk}
-                        onPointerDown={e => handlePointerDown(fk, e)}
-                        className={`absolute select-none p-1 rounded cursor-move border flex items-center justify-center ${isActive ? `${aB} ${aBg} shadow-lg ring-1 ring-pink-500 z-30` : `${nB} ${nBg} z-10 shadow-sm`} transition-all`}
-                        style={{
-                          left: `${field.x}%`, top: `${field.y}%`,
-                          transform: `translate(${field.align === 'center' ? '-50%' : field.align === 'right' ? '-100%' : '0%'}, -50%)`
-                        }}
-                      >
-                        <span style={{ fontSize: `${field.fontSize * 0.4}px`, fontWeight: field.fontWeight, color: field.color }}>{label}</span>
+                {/* Field selector */}
+                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Campo activo</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {projectFields.map(f => (
+                      <button key={f.id} type="button" onClick={() => setActiveFieldId(f.id)}
+                        className={`py-1.5 px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                          activeFieldId === f.id
+                            ? 'bg-pink-50 dark:bg-pink-900/20 border-pink-500 text-pink-600 dark:text-pink-300'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >{f.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Field properties */}
+                {activeField && (
+                  <div className="space-y-3 p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-pink-600 dark:text-pink-400 truncate">{activeField.label}</span>
+                      <label className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold cursor-pointer shrink-0">
+                        <input type="checkbox" checked={activeField.enabled}
+                          onChange={e => updateProjectField(activeFieldId, { enabled: e.target.checked })} />
+                        Habilitado
+                      </label>
+                    </div>
+
+                    {/* Position sliders */}
+                    <div className="space-y-2 text-xs">
+                      {[
+                        { label: 'Posición X', prop: 'x' as const, max: 100, step: 0.5 },
+                        { label: 'Posición Y', prop: 'y' as const, max: 100, step: 0.5 },
+                        { label: 'Ancho', prop: 'width' as const, max: 100, step: 0.5, min: 3 },
+                        { label: 'Alto', prop: 'height' as const, max: 50, step: 0.5, min: 1 },
+                      ].map(sl => (
+                        <div key={sl.prop} className="space-y-0.5">
+                          <div className="flex justify-between text-[10px] text-slate-500">
+                            <span>{sl.label} (%)</span>
+                            <span className="font-mono text-pink-500 font-bold">{(activeField[sl.prop] as number).toFixed(1)}%</span>
+                          </div>
+                          <input type="range" min={sl.min ?? 0} max={sl.max} step={sl.step}
+                            value={activeField[sl.prop] as number}
+                            onChange={e => updateProjectField(activeFieldId, { [sl.prop]: parseFloat(e.target.value) })}
+                            className="w-full accent-pink-500 cursor-pointer" />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Text options */}
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <div>
+                        <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Fuente (pt)</label>
+                        <input type="number" min={6} max={200} value={activeField.fontSize}
+                          onChange={e => updateProjectField(activeFieldId, { fontSize: parseInt(e.target.value) || 12 })}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded font-mono text-xs px-2.5 py-1.5 focus:ring-1 focus:ring-pink-500 focus:outline-none text-slate-900 dark:text-white" />
                       </div>
-                    );
-                  })}
+                      <div>
+                        <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Color</label>
+                        <div className="flex gap-1">
+                          <input type="color" value={activeField.color}
+                            onChange={e => updateProjectField(activeFieldId, { color: e.target.value })}
+                            className="w-8 h-8 border-0 bg-transparent cursor-pointer rounded" />
+                          <input type="text" value={activeField.color}
+                            onChange={e => updateProjectField(activeFieldId, { color: e.target.value })}
+                            className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded font-mono text-[10px] uppercase px-1.5 py-1 focus:ring-1 focus:ring-pink-500 focus:outline-none text-slate-900 dark:text-white" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Grosor</label>
+                        <select value={activeField.fontWeight}
+                          onChange={e => updateProjectField(activeFieldId, { fontWeight: e.target.value as any })}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-xs px-2 py-1.5 text-slate-800 dark:text-slate-300 focus:ring-1 focus:ring-pink-500 focus:outline-none">
+                          <option value="normal">Normal</option>
+                          <option value="bold">Negrita</option>
+                          <option value="bolder">Gruesa</option>
+                          <option value="black">Negra</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Alineación</label>
+                        <div className="flex border border-slate-200 dark:border-slate-700 rounded overflow-hidden">
+                          {(['left', 'center', 'right'] as const).map(a => (
+                            <button key={a} type="button" onClick={() => updateProjectField(activeFieldId, { align: a })}
+                              className={`flex-1 py-1.5 flex items-center justify-center cursor-pointer transition-colors ${
+                                activeField.align === a ? 'bg-pink-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'
+                              }`}>
+                              {a === 'left' ? <AlignLeft className="w-3 h-3" /> : a === 'center' ? <AlignCenter className="w-3 h-3" /> : <AlignRight className="w-3 h-3" />}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 text-[10px] text-slate-500 font-semibold cursor-pointer">
+                      <input type="checkbox" checked={activeField.autoFit}
+                        onChange={e => updateProjectField(activeFieldId, { autoFit: e.target.checked })} />
+                      Auto-ajustar texto al bounding box
+                    </label>
+                    {activeField.dataKey === 'custom' && (
+                      <div>
+                        <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Valor fijo</label>
+                        <input type="text" value={activeField.staticValue ?? ''}
+                          onChange={e => updateProjectField(activeFieldId, { staticValue: e.target.value })}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-xs px-2.5 py-1.5 focus:ring-1 focus:ring-pink-500 focus:outline-none text-slate-900 dark:text-white"
+                          placeholder="Ej: Universidad de Nariño" />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button onClick={handleSaveSettings} disabled={savingSettings}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs py-3 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow cursor-pointer uppercase tracking-wider disabled:opacity-50">
+                  {savingSettings ? <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</> : <><Check className="w-4 h-4" /> Guardar Diseño</>}
+                </button>
+              </div>
+
+              {/* ── Canvas ── */}
+              <div className="xl:col-span-8 flex flex-col gap-3">
+                <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-2.5 flex items-center gap-2 text-xs shadow-sm">
+                  <Move className="w-3.5 h-3.5 text-pink-500 shrink-0" />
+                  <span className="text-slate-500 dark:text-slate-400">
+                    Arrastra campos · Handles <span className="text-pink-500 font-bold">→ ancho</span> / <span className="text-pink-500 font-bold">↓ alto</span> / <span className="text-pink-500 font-bold">↘ ambos</span> · Campo activo: <strong className="text-pink-500">{activeField?.label}</strong>
+                  </span>
+                </div>
+
+                <div className="bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                  <div
+                    ref={el => {
+                      (canvasRef as any).current = el;
+                      if (el) setCanvasPxWidth(el.offsetWidth);
+                    }}
+                    className="w-full relative select-none overflow-hidden touch-none"
+                    style={{
+                      aspectRatio: String(ar),
+                      backgroundImage: settings.template?.bgImage ? `url(${settings.template.bgImage})` : 'none',
+                      backgroundSize: '100% 100%',
+                      backgroundColor: darkMode ? '#0c071a' : '#f8f5ff'
+                    }}
+                  >
+                    {!settings.template?.bgImage && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-20">
+                        <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle, #db2777 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
+                        <Maximize2 className="w-10 h-10 text-slate-400 mb-2" />
+                        <p className="text-xs font-bold font-mono tracking-widest text-slate-500 uppercase">Canvas del Certificado</p>
+                      </div>
+                    )}
+
+                    {projectFields.map(field => {
+                      if (!field.enabled) return null;
+                      const isActive = activeFieldId === field.id;
+                      const previewFontPx = field.fontSize * scale;
+                      return (
+                        <div
+                          key={field.id}
+                          ref={el => { if (el) fieldElemRefs.current.set(field.id, el); else fieldElemRefs.current.delete(field.id); }}
+                          onPointerDown={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setActiveFieldId(field.id);
+                            dragRef.current = { fieldId: field.id, startCX: e.clientX, startCY: e.clientY, startFX: field.x, startFY: field.y, lastX: field.x, lastY: field.y };
+                          }}
+                          className={`absolute select-none rounded overflow-hidden cursor-grab active:cursor-grabbing transition-shadow ${
+                            isActive
+                              ? 'border-2 border-pink-500 shadow-lg ring-2 ring-pink-500/40 z-30'
+                              : 'border border-white/50 z-10 shadow-sm'
+                          }`}
+                          style={{
+                            left: `${field.x}%`, top: `${field.y}%`,
+                            width: `${field.width}%`, height: `${field.height}%`,
+                            transform: 'translate(-50%, -50%)',
+                            backgroundColor: isActive ? 'rgba(236,72,153,0.12)' : 'rgba(255,255,255,0.06)',
+                          }}
+                        >
+                          {/* Preview text */}
+                          <div className="absolute inset-0 flex items-center overflow-hidden px-0.5"
+                            style={{ justifyContent: field.align === 'center' ? 'center' : field.align === 'right' ? 'flex-end' : 'flex-start' }}>
+                            <span style={{
+                              fontSize: `${Math.min(previewFontPx, parseFloat(getComputedStyle(document.documentElement).fontSize || '16') * 100)}px`,
+                              fontWeight: field.fontWeight,
+                              color: field.color,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              maxWidth: '100%',
+                              lineHeight: 1.1,
+                            }}>
+                              {previewText(field)}
+                            </span>
+                          </div>
+
+                          {/* Resize handles – only when active */}
+                          {isActive && (
+                            <>
+                              {/* Right edge */}
+                              <div
+                                className="absolute right-0 top-0 bottom-0 w-4 cursor-ew-resize z-40 flex items-center justify-center"
+                                onPointerDown={e => {
+                                  e.preventDefault(); e.stopPropagation();
+                                  resizeRef.current = { fieldId: field.id, handle: 'right', startCX: e.clientX, startCY: e.clientY, startW: field.width, startH: field.height, lastW: field.width, lastH: field.height };
+                                }}
+                              >
+                                <div className="w-1 h-8 bg-pink-500 rounded-full opacity-80" />
+                              </div>
+                              {/* Bottom edge */}
+                              <div
+                                className="absolute bottom-0 left-0 right-0 h-4 cursor-ns-resize z-40 flex items-center justify-center"
+                                onPointerDown={e => {
+                                  e.preventDefault(); e.stopPropagation();
+                                  resizeRef.current = { fieldId: field.id, handle: 'bottom', startCX: e.clientX, startCY: e.clientY, startW: field.width, startH: field.height, lastW: field.width, lastH: field.height };
+                                }}
+                              >
+                                <div className="h-1 w-8 bg-pink-500 rounded-full opacity-80" />
+                              </div>
+                              {/* Corner */}
+                              <div
+                                className="absolute bottom-0 right-0 w-5 h-5 cursor-nwse-resize z-50 flex items-end justify-end p-0.5"
+                                onPointerDown={e => {
+                                  e.preventDefault(); e.stopPropagation();
+                                  resizeRef.current = { fieldId: field.id, handle: 'corner', startCX: e.clientX, startCY: e.clientY, startW: field.width, startH: field.height, lastW: field.width, lastH: field.height };
+                                }}
+                              >
+                                <div className="w-3 h-3 border-r-2 border-b-2 border-pink-500" />
+                              </div>
+                              {/* Field info badge */}
+                              <div className="absolute -top-5 left-0 text-[9px] font-bold bg-pink-600 text-white px-1.5 py-0.5 rounded-t whitespace-nowrap z-50">
+                                {field.label} · {field.width.toFixed(0)}%×{field.height.toFixed(0)}%
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ════ TAB: BULK CSV ════════════════════════════════════════════ */}
         {activeTab === 'bulk' && (
@@ -1034,6 +1187,76 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
         {/* ════ TAB: SETTINGS ════════════════════════════════════════════ */}
         {activeTab === 'settings' && (
           <div className="max-w-2xl mx-auto flex flex-col gap-5">
+
+            {/* Custom Fields Config */}
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
+              <h2 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
+                <LayoutTemplate className="w-4 h-4 text-pink-500" /> Campos del Certificado
+              </h2>
+              <p className="text-xs text-slate-400">Campos que aparecerán en el certificado. Edita el nombre, quita o añade campos. Posición y tamaño en el Diseñador.</p>
+
+              <div className="space-y-2">
+                {projectFields.map((field, idx) => (
+                  <div key={field.id} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 p-2.5 rounded-lg">
+                    <input
+                      type="text"
+                      value={field.label}
+                      onChange={e => setProjectFields(prev => prev.map(f => f.id === field.id ? { ...f, label: e.target.value } : f))}
+                      className="flex-1 bg-transparent font-bold text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-pink-500 rounded px-1 min-w-0"
+                    />
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                      field.dataKey === 'name' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' :
+                      field.dataKey === 'identification' ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400' :
+                      field.dataKey === 'role' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' :
+                      'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}>
+                      {field.dataKey === 'name' ? 'Nombre' : field.dataKey === 'identification' ? 'Cédula' : field.dataKey === 'role' ? 'Rol' : 'Texto fijo'}
+                    </span>
+                    {projectFields.length > 1 && (
+                      <button type="button" onClick={() => setProjectFields(prev => prev.filter(f => f.id !== field.id))}
+                        className="text-slate-400 hover:text-red-500 cursor-pointer transition-colors shrink-0">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <form onSubmit={e => {
+                e.preventDefault();
+                if (!newFieldLabel.trim()) return;
+                const newField: FieldConfig = {
+                  id: `field_${Date.now()}`, label: newFieldLabel.trim(), dataKey: newFieldDataKey,
+                  x: 50, y: 50, width: 30, height: 6, fontSize: 18,
+                  color: '#1e1b4b', fontWeight: 'normal', enabled: true, align: 'center', autoFit: true,
+                  staticValue: newFieldDataKey === 'custom' ? '' : undefined
+                };
+                setProjectFields(prev => [...prev, newField]);
+                setNewFieldLabel('');
+              }} className="space-y-2">
+                <input type="text" value={newFieldLabel} onChange={e => setNewFieldLabel(e.target.value)}
+                  maxLength={40} placeholder="Nombre del campo (ej: Fecha, Evento...)"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-pink-500" />
+                <div className="flex gap-2">
+                  <select value={newFieldDataKey} onChange={e => setNewFieldDataKey(e.target.value as any)}
+                    className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-pink-500">
+                    <option value="name">→ Nombre del participante</option>
+                    <option value="identification">→ Cédula / ID</option>
+                    <option value="role">→ Rol / Cargo</option>
+                    <option value="custom">→ Texto fijo (configurable)</option>
+                  </select>
+                  <button type="submit" disabled={!newFieldLabel.trim()}
+                    className="bg-pink-600 hover:bg-pink-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl disabled:opacity-40 cursor-pointer shadow flex items-center gap-1">
+                    <Plus className="w-3.5 h-3.5" /> Agregar
+                  </button>
+                </div>
+              </form>
+
+              <button onClick={handleSaveSettings} disabled={savingSettings || !selectedProjectId}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow disabled:opacity-40">
+                {savingSettings ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Guardando...</> : <><Check className="w-3.5 h-3.5" /> Guardar Campos del Proyecto</>}
+              </button>
+            </div>
 
             {/* Roles Config */}
             <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">

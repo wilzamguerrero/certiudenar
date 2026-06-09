@@ -235,7 +235,15 @@ async function saveNotionProjectConfigToNotion(toggleBlockId: string, config: an
     const results: any[] = listResponse.results || [];
 
     const existingCodeBlock = results.find((b: any) => b.type === 'code' && b.code?.language === 'json');
-    const serializeConfig = { nameField: config.nameField, idField: config.idField, roleField: config.roleField };
+    const serializeConfig = {
+      fields: config.fields,
+      bgAspectRatio: config.bgAspectRatio,
+      roles: config.roles,
+      // Legacy backward compat
+      nameField: config.nameField ?? (Array.isArray(config.fields) ? config.fields.find((f: any) => f.id === 'nameField') : undefined),
+      idField: config.idField ?? (Array.isArray(config.fields) ? config.fields.find((f: any) => f.id === 'idField') : undefined),
+      roleField: config.roleField ?? (Array.isArray(config.fields) ? config.fields.find((f: any) => f.id === 'roleField') : undefined),
+    };
     const configJsonString = JSON.stringify(serializeConfig, null, 2);
     const jsonChunks: any[] = [];
     for (let i = 0; i < configJsonString.length; i += 2000) {
@@ -327,6 +335,9 @@ async function startServer() {
             if (Object.keys(parsedLayout).length > 0 || parsedBg) {
               config = {
                 bgImage: parsedBg,
+                bgAspectRatio: parsedLayout.bgAspectRatio ?? null,
+                fields: parsedLayout.fields ?? null,
+                roles: parsedLayout.roles ?? null,
                 nameField: parsedLayout.nameField || DEFAULT_SETTINGS.template.nameField,
                 idField: parsedLayout.idField || DEFAULT_SETTINGS.template.idField,
                 roleField: parsedLayout.roleField || DEFAULT_SETTINGS.template.roleField
@@ -341,6 +352,9 @@ async function startServer() {
         if (!config) {
           config = {
             bgImage: null,
+            bgAspectRatio: null,
+            fields: null,
+            roles: null,
             nameField: DEFAULT_SETTINGS.template.nameField,
             idField: DEFAULT_SETTINGS.template.idField,
             roleField: DEFAULT_SETTINGS.template.roleField
