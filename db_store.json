@@ -1,0 +1,67 @@
+{
+  "settings": {
+    "dailyCode": "DISENO26",
+    "template": {
+      "bgImage": "/assets/.aistudio/image_banner.jpg",
+      "nameField": {
+        "x": 22.5,
+        "y": 61.9,
+        "fontSize": 32,
+        "color": "#1e1b4b",
+        "fontWeight": "bold",
+        "enabled": true,
+        "align": "center"
+      },
+      "idField": {
+        "x": 23.1,
+        "y": 68.4,
+        "fontSize": 18,
+        "color": "#1f2937",
+        "fontWeight": "normal",
+        "enabled": true,
+        "align": "center"
+      },
+      "roleField": {
+        "x": 22.5,
+        "y": 73.3,
+        "fontSize": 15,
+        "color": "#4b5563",
+        "fontWeight": "bold",
+        "enabled": true,
+        "align": "center"
+      }
+    }
+  },
+  "projectsConfig": {
+    "37a43424-2525-810d-ba79-c9cb5ddd3858": {
+      "bgImage": null,
+      "nameField": {
+        "x": 28,
+        "y": 60,
+        "fontSize": 32,
+        "color": "#1e1b4b",
+        "fontWeight": "bold",
+        "enabled": true,
+        "align": "center"
+      },
+      "idField": {
+        "x": 28,
+        "y": 71,
+        "fontSize": 18,
+        "color": "#1f2937",
+        "fontWeight": "normal",
+        "enabled": true,
+        "align": "center"
+      },
+      "roleField": {
+        "x": 29,
+        "y": 81.5,
+        "fontSize": 15,
+        "color": "#4b5563",
+        "fontWeight": "bold",
+        "enabled": true,
+        "align": "center"
+      }
+    }
+  }
+}

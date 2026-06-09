@@ -12,6 +12,7 @@ interface CertificateProps {
   identification: string;
   role: string;
   id?: string;
+  pageId?: string; // Notion page ID for marking as generated
   onDownloaded?: () => void;
   templateConfig?: TemplateConfig | null;
 }
@@ -21,6 +22,7 @@ export default function CertificateTemplate({
   identification,
   role,
   id = 'TEMP123',
+  pageId,
   onDownloaded,
   templateConfig
 }: CertificateProps) {
@@ -75,7 +77,17 @@ export default function CertificateTemplate({
           document.body.appendChild(downloadLink);
           downloadLink.click();
           document.body.removeChild(downloadLink);
-          
+
+          // Mark as generated in Notion with download URL
+          if (pageId) {
+            const downloadUrl = `${window.location.origin}/?view=download&id=${identification}`;
+            fetch('/api/notion/registrants/mark-generated', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pageId, downloadUrl })
+            }).catch(err => console.warn('Could not mark as generated:', err));
+          }
+
           setDownloaded(true);
           if (onDownloaded) onDownloaded();
           setTimeout(() => setDownloaded(false), 3000);

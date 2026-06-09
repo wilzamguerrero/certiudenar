@@ -251,8 +251,8 @@ export default function App() {
       if (data.success) {
         if (data.found && data.data) {
           setMatchingRegistrant(data.data);
-          if (data.data.status === 'correcto' || data.data.status === 'certificado') {
-            setSuccessMsg('¡Felicidades! Certificado disponible.');
+          if (data.data.status === 'certificado') {
+            setSuccessMsg('¡Certificado disponible para descarga!');
           }
         } else {
           setErrorMsg('No se encontró asistencia registrada con esa identificación en este proyecto.');
@@ -545,14 +545,14 @@ export default function App() {
                     <label className="block text-xs font-bold text-on-surface-variant">
                       Tu Rol de Asistencia
                     </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {(['estudiante', 'egresado', 'empresario'] as RoleType[]).map((role) => (
+                    <div className="flex flex-wrap gap-2">
+                      {(projects.find(p => p.id === selectedProjectId)?.config?.roles || ['estudiante', 'egresado', 'empresario']).map((role: string) => (
                         <button
                           key={role}
                           type="button"
                           onClick={() => setRegRole(role)}
                           id={`role-btn-${role}`}
-                          className={`py-2.5 px-3 text-xs font-bold capitalize rounded-xl border transition-all text-center cursor-pointer ${
+                          className={`flex-1 min-w-[80px] py-2.5 px-3 text-xs font-bold capitalize rounded-xl border transition-all text-center cursor-pointer ${
                             regRole === role
                               ? 'bg-secondary-container text-on-secondary-container border-secondary-container shadow-sm'
                               : 'bg-surface border-outline-variant text-on-surface-variant hover:bg-surface-container'
@@ -564,10 +564,10 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Email Delivery */}
+                  {/* Email */}
                   <div className="space-y-1.5">
                     <label className="block text-xs font-bold text-on-surface-variant">
-                      Correo Electrónico (Para envío PDF)
+                      Correo Electrónico
                     </label>
                     <div className="relative">
                       <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-outline">
@@ -672,9 +672,9 @@ export default function App() {
                     <span>💡 ¿Qué pasará ahora?</span>
                   </p>
                   <ol className="list-decimal pl-4.5 space-y-1 text-on-surface-variant font-medium">
-                    <li>La coordinación validará tu asistencia oficial con el Código Diario.</li>
-                    <li>Una vez corroborada, el estado cambiará a <strong className="text-primary">correcto</strong>.</li>
-                    <li>Recibirás un <strong className="text-primary">correo electrónico automático</strong> con enlace de descarga, o podrás buscarlo aquí mismo.</li>
+                    <li>La coordinación revisará tu solicitud en Notion.</li>
+                    <li>Cuando sea aprobada, el estado cambiará a <strong className="text-primary">certificado</strong>.</li>
+                    <li>Vuelve a esta sección <strong className="text-primary">"Descargar Certificado"</strong> e ingresa tu documento para obtenerlo.</li>
                   </ol>
                 </div>
 
@@ -792,8 +792,8 @@ export default function App() {
                 {searched && matchingRegistrant && (
                   <div className="border border-outline-variant bg-surface rounded-xl p-5 space-y-5 animate-fade-in">
                     
-                    {/* 1. Status Approved / Certified Block */}
-                    {(matchingRegistrant.status === 'correcto' || matchingRegistrant.status === 'certificado') ? (
+                    {/* 1. Status Certificado */}
+                    {matchingRegistrant.status === 'certificado' ? (
                       <div className="space-y-4">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 gap-3">
                           <div>
@@ -813,6 +813,7 @@ export default function App() {
                             identification={matchingRegistrant.identification}
                             role={matchingRegistrant.role}
                             id={matchingRegistrant.id}
+                            pageId={matchingRegistrant.id}
                             templateConfig={projects.find(p => p.id === searchProjectId)?.config}
                           />
                         </div>

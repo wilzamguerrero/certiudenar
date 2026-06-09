@@ -1,34 +1,35 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import React, { useState, useEffect, useRef, FormEvent } from 'react';
-import { 
-  Users, 
-  Settings as SettingsIcon, 
-  Mail, 
-  FileCheck, 
-  Key, 
-  Check, 
-  X, 
-  Eye, 
-  RefreshCw, 
-  Database, 
+import {
+  Users,
+  Settings as SettingsIcon,
+  FileCheck,
+  Key,
+  Check,
+  X,
+  Eye,
+  RefreshCw,
   Trash2,
   Upload,
   Sparkles,
   Layers,
-  ChevronRight,
   Maximize2,
-  Activity,
   FileSpreadsheet,
-  AlertCircle,
   Sun,
   Moon,
   Plus,
   Pencil,
-  UserPlus
+  UserPlus,
+  ChevronDown,
+  Award,
+  Clock,
+  AlertTriangle,
+  Download,
+  ExternalLink
 } from 'lucide-react';
 import { Registrant } from '../types.js';
 import CertificateTemplate from './CertificateTemplate.tsx';
@@ -39,66 +40,78 @@ interface AdminDashboardProps {
   setDarkMode: (val: boolean) => void;
 }
 
-type TabType = 'registrants' | 'designer' | 'bulk' | 'emails' | 'settings';
+type TabType = 'registrants' | 'designer' | 'bulk' | 'settings';
 
 export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('registrants');
-  
-  // Data States
+
+  // Data
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [registrants, setRegistrants] = useState<Registrant[]>([]);
   const [settings, setSettings] = useState<any>({
     dailyCode: 'DISENO26',
     template: {
-      bgImage: '/assets/.aistudio/image_banner.jpg',
+      bgImage: null,
       nameField: { x: 22.5, y: 61.9, fontSize: 32, color: '#1e1b4b', fontWeight: 'bold', enabled: true, align: 'center' },
       idField: { x: 23.1, y: 68.4, fontSize: 18, color: '#1f2937', fontWeight: 'normal', enabled: true, align: 'center' },
       roleField: { x: 22.5, y: 73.3, fontSize: 15, color: '#4b5563', fontWeight: 'bold', enabled: true, align: 'center' }
     }
   });
 
-  // UI / Feedback states
+  // UI
   const [loading, setLoading] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [previewingCert, setPreviewingCert] = useState<Registrant | null>(null);
-  
-  // Designer States
+
+  // Designer
   const [activeFieldKey, setActiveFieldKey] = useState<'nameField' | 'idField' | 'roleField'>('nameField');
   const [isDragging, setIsDragging] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  // Bulk Upload States
+  // Bulk
   const [csvText, setCsvText] = useState('');
   const [parsedItems, setParsedItems] = useState<any[]>([]);
-  const [bulkStatus, setBulkStatus] = useState<{ status: 'idle' | 'processing' | 'success' | 'error', message: string }>({ status: 'idle', message: '' });
+  const [bulkStatus, setBulkStatus] = useState<{ status: 'idle' | 'processing' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
 
-  // Create Project States
+  // Create Project
   const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
   const [newProjectTitle, setNewProjectTitle] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
   const [modalError, setModalError] = useState('');
 
-  // Manual / Edit Registrant States
+  // Edit Registrant
   const [editingReg, setEditingReg] = useState<Registrant | null>(null);
   const [editName, setEditName] = useState('');
   const [editId, setEditId] = useState('');
-  const [editRole, setEditRole] = useState<'estudiante' | 'egresado' | 'empresario'>('estudiante');
+  const [editRole, setEditRole] = useState<string>('estudiante');
   const [editEmail, setEditEmail] = useState('');
-  const [editStatus, setEditStatus] = useState<'recibido' | 'correcto' | 'incorrecto'>('recibido');
+  const [editStatus, setEditStatus] = useState<'recibido' | 'incorrecto' | 'certificado'>('recibido');
   const [updatingReg, setUpdatingReg] = useState(false);
 
+  // Add Registrant
   const [showAddRegModal, setShowAddRegModal] = useState(false);
   const [addName, setAddName] = useState('');
   const [addId, setAddId] = useState('');
-  const [addRole, setAddRole] = useState<'estudiante' | 'egresado' | 'empresario'>('estudiante');
+  const [addRole, setAddRole] = useState<string>('estudiante');
   const [addEmail, setAddEmail] = useState('');
   const [addingReg, setAddingReg] = useState(false);
   const [addRegError, setAddRegError] = useState('');
 
-  // 1. Fetch Notion Projects (Toggle lists)
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Project roles config
+  const [projectRoles, setProjectRoles] = useState<string[]>(['estudiante', 'egresado', 'empresario']);
+  const [newRoleInput, setNewRoleInput] = useState('');
+
+  const flash = (msg: string, isError = false) => {
+    if (isError) { setErrorMsg(msg); setTimeout(() => setErrorMsg(''), 5000); }
+    else { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(''), 5000); }
+  };
+
   const fetchProjectsList = async () => {
     setLoading(true);
     try {
@@ -108,31 +121,59 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
         setProjects(d.data);
         if (d.data.length > 0) {
           setSelectedProjectId(prev => {
-            const exists = d.data.some(p => p.id === prev);
+            const exists = d.data.some((p: any) => p.id === prev);
             return exists ? prev : d.data[0].id;
           });
         }
-      } else {
-        setErrorMsg('Fallo al obtener proyectos desde Notion.');
-      }
+      } else flash('Fallo al obtener proyectos desde Notion.', true);
     } catch (e) {
-      console.error('Error fetching projects list:', e);
-      setErrorMsg('No se pudo establecer conexión para obtener la lista de proyectos.');
+      flash('No se pudo conectar para obtener la lista de proyectos.', true);
     } finally {
       setLoading(false);
     }
   };
 
-  // 1.8. Handle creation of a new Notion project / workshop
+  const fetchProjectRegistrants = async (projectId: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/notion/projects/${projectId}/registrants`);
+      const d = await res.json();
+      if (d.success && Array.isArray(d.data)) setRegistrants(d.data);
+    } catch { flash('Error al cargar participantes.', true); }
+    finally { setLoading(false); }
+  };
+
+  const fetchGeneralSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/settings');
+      const d = await res.json();
+      if (d.success && d.data) setSettings((prev: any) => ({ ...prev, dailyCode: d.data.dailyCode }));
+    } catch { /* silent */ }
+  };
+
+  useEffect(() => { fetchProjectsList(); fetchGeneralSettings(); }, []);
+
+  useEffect(() => {
+    if (selectedProjectId && projects.length > 0) {
+      fetchProjectRegistrants(selectedProjectId);
+      setSelectedIds(new Set());
+      const activeProject = projects.find(p => p.id === selectedProjectId);
+      if (activeProject?.config) {
+        setSettings((prev: any) => ({ ...prev, template: activeProject.config }));
+        if (Array.isArray(activeProject.config.roles) && activeProject.config.roles.length > 0) {
+          setProjectRoles(activeProject.config.roles);
+        } else {
+          setProjectRoles(['estudiante', 'egresado', 'empresario']);
+        }
+      }
+    }
+  }, [selectedProjectId, projects]);
+
   const handleCreateProject = async (e: FormEvent) => {
     e.preventDefault();
     if (!newProjectTitle.trim()) return;
-
     setCreatingProject(true);
     setModalError('');
-    setErrorMsg('');
-    setSuccessMsg('');
-
     try {
       const response = await fetch('/api/notion/projects', {
         method: 'POST',
@@ -140,132 +181,43 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
         body: JSON.stringify({ title: newProjectTitle.trim() })
       });
       const data = await response.json();
-
       if (data.success) {
-        // Clear inputs and modal error
         setNewProjectTitle('');
-        setModalError('');
         setShowCreateProjectModal(false);
-
-        // Success notice
-        setSuccessMsg(`¡Taller "${data.data?.title || 'Nuevo'}" creado con éxito en Notion con su planilla!`);
-
-        // Refresh list
+        flash(`¡Taller "${data.data?.title || 'Nuevo'}" creado con éxito!`);
         setLoading(true);
         const res = await fetch('/api/notion/projects');
         const d = await res.json();
         if (d.success && Array.isArray(d.data)) {
           setProjects(d.data);
-          if (data.data && data.data.id) {
-            setSelectedProjectId(data.data.id);
-          }
+          if (data.data?.id) setSelectedProjectId(data.data.id);
         }
-      } else {
-        setModalError(data.message || 'Error al intentar crear el taller en Notion.');
-      }
-    } catch (err) {
-      console.error('Error creating project:', err);
-      setModalError('Ocurrió un error al conectar con el servidor.');
-    } finally {
-      setCreatingProject(false);
-      setLoading(false);
-    }
+        setLoading(false);
+      } else setModalError(data.message || 'Error al crear el taller.');
+    } catch { setModalError('Error de conexión.'); }
+    finally { setCreatingProject(false); }
   };
 
-  // 2. Fetch registrants for the active project from Notion
-  const fetchProjectRegistrants = async (projectId: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/notion/projects/${projectId}/registrants`);
-      const d = await res.json();
-      if (d.success && Array.isArray(d.data)) {
-        setRegistrants(d.data);
-      }
-    } catch (err) {
-      console.error('Error fetching registrants:', err);
-      setErrorMsg('Error al cargar asistentes registrados desde la tabla de Notion.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Fetch projects on mount
-  useEffect(() => {
-    fetchProjectsList();
-    
-    // Also load general passcode settings
-    const fetchGeneralSettings = async () => {
-      try {
-        const res = await fetch('/api/admin/settings');
-        const d = await res.json();
-        if (d.success && d.data) {
-          setSettings(prev => ({
-            ...prev,
-            dailyCode: d.data.dailyCode
-          }));
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    fetchGeneralSettings();
-  }, []);
-
-  // Update layout template coordinates whenever active project changes
-  useEffect(() => {
-    if (selectedProjectId && projects.length > 0) {
-      fetchProjectRegistrants(selectedProjectId);
-
-      const activeProject = projects.find(p => p.id === selectedProjectId);
-      if (activeProject && activeProject.config) {
-        setSettings(prev => ({
-          ...prev,
-          template: activeProject.config
-        }));
-      }
-    }
-  }, [selectedProjectId, projects]);
-
-  const fetchData = async () => {
-    if (selectedProjectId) {
-      await fetchProjectsList();
-      await fetchProjectRegistrants(selectedProjectId);
-    } else {
-      await fetchProjectsList();
-    }
-  };
-
-  // 3. Save coordinates/image for the ACTIVE project only
   const handleSaveSettings = async () => {
     if (!selectedProjectId) return;
     setSavingSettings(true);
-    setErrorMsg('');
-    setSuccessMsg('');
     try {
-      const response = await fetch(`/api/notion/projects/${selectedProjectId}/config`, {
+      const configToSave = { ...settings.template, roles: projectRoles };
+      const res = await fetch(`/api/notion/projects/${selectedProjectId}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: settings.template })
+        body: JSON.stringify({ config: configToSave })
       });
-      const result = response.ok ? await response.json() : null;
-
-      if (result && result.success) {
-        setSuccessMsg('Diseño de plantilla personalizado guardado exitosamente.');
-        // Update loaded projects state to keep in sync
-        setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, config: settings.template } : p));
-        setTimeout(() => setSuccessMsg(''), 5000);
-      } else {
-        setErrorMsg('Fallo al guardar diseño en disco.');
-      }
-    } catch (err) {
-      setErrorMsg('Error de red al actualizar los parámetros.');
-    } finally {
-      setSavingSettings(false);
-    }
+      const result = await res.json();
+      if (result.success) {
+        flash('Diseño guardado exitosamente.');
+        setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, config: configToSave } : p));
+      } else flash(result.message || 'Error al guardar.', true);
+    } catch { flash('Error de red al guardar.', true); }
+    finally { setSavingSettings(false); }
   };
 
-  // Save general passcode helper
-  const handleSavePasscodeOnly = async (newCode: string) => {
+  const handleSavePasscode = async (newCode: string) => {
     setSavingSettings(true);
     try {
       const res = await fetch('/api/admin/settings', {
@@ -274,374 +226,201 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
         body: JSON.stringify({ dailyCode: newCode })
       });
       const d = await res.json();
-      if (d.success) {
-        setSuccessMsg('Código de asistencia guardado correctamente.');
-        setSettings(prev => ({ ...prev, dailyCode: newCode }));
-        setTimeout(() => setSuccessMsg(''), 4000);
-      }
-    } catch (err) {
-      setErrorMsg('Error al guardar el código de asistencia.');
-    } finally {
-      setSavingSettings(false);
-    }
+      if (d.success) { flash('Código guardado.'); setSettings((prev: any) => ({ ...prev, dailyCode: newCode })); }
+    } catch { flash('Error al guardar código.', true); }
+    finally { setSavingSettings(false); }
   };
 
-  // 4. Delete participant inside Notion (archives database page)
   const handleDeleteRegistrant = async (id: string, name: string) => {
-    if (!window.confirm(`¿Seguro que deseas eliminar permanentemente a "${name}" de la tabla de Notion?`)) {
-      return;
-    }
+    if (!window.confirm(`¿Eliminar a "${name}" de Notion?`)) return;
     try {
-      const res = await fetch('/api/notion/registrants/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageId: id })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSuccessMsg('Participante eliminado con éxito de Notion.');
-        setRegistrants(prev => prev.filter(r => r.id !== id));
-        setTimeout(() => setSuccessMsg(''), 4000);
-      } else {
-        setErrorMsg(data.message || 'No se pudo eliminar de Notion.');
-      }
-    } catch (e) {
-      setErrorMsg('Error de red al comunicarse con el servidor.');
-    }
+      const res = await fetch('/api/notion/registrants/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pageId: id }) });
+      const d = await res.json();
+      if (d.success) { flash('Participante eliminado.'); setRegistrants(prev => prev.filter(r => r.id !== id)); }
+      else flash(d.message || 'No se pudo eliminar.', true);
+    } catch { flash('Error de red.', true); }
   };
 
-  // 5. Update Status in Notion Database
-  const handleUpdateStatus = async (id: string, newStatus: 'recibido' | 'correcto' | 'incorrecto') => {
+  const handleCertify = async (id: string) => {
     try {
-      const response = await fetch('/api/notion/registrants/update', {
+      const res = await fetch('/api/notion/registrants/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageId: id, status: newStatus })
+        body: JSON.stringify({ pageId: id, status: 'certificado' })
       });
-      const result = await response.json();
-      
+      const result = await res.json();
       if (result.success) {
-        setSuccessMsg('Estado sincronizado en tiempo real con Notion.');
-        setRegistrants(prev => prev.map(r => r.id === id ? { 
-          ...r, 
-          status: newStatus === 'correcto' ? 'correcto' : newStatus
-        } : r));
-        setTimeout(() => setSuccessMsg(''), 5000);
-      } else {
-        setErrorMsg('No se pudo actualizar el estado.');
-      }
-    } catch (e) {
-      setErrorMsg('Fallo de red al guardar estado.');
-    }
+        flash('Estado actualizado a Certificado en Notion.');
+        setRegistrants(prev => prev.map(r => r.id === id ? { ...r, status: 'certificado' } : r));
+      } else flash(result.message || 'No se pudo actualizar.', true);
+    } catch { flash('Error de red.', true); }
   };
 
-  // 5.5. Edit full properties of participant in Notion
+  const handleMarkIncorrect = async (id: string) => {
+    try {
+      const res = await fetch('/api/notion/registrants/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageId: id, status: 'incorrecto' })
+      });
+      const result = await res.json();
+      if (result.success) {
+        flash('Marcado como incorrecto en Notion.');
+        setRegistrants(prev => prev.map(r => r.id === id ? { ...r, status: 'incorrecto' } : r));
+      } else flash(result.message || 'No se pudo actualizar.', true);
+    } catch { flash('Error de red.', true); }
+  };
+
   const handleSaveEditRegistrant = async (e: FormEvent) => {
     e.preventDefault();
-    if (!editingReg) return;
-    if (!editName.trim() || !editId.trim() || !editEmail.trim()) {
-      setErrorMsg('Por favor completa todos los campos del participante.');
-      return;
+    if (!editingReg || !editName.trim() || !editId.trim() || !editEmail.trim()) {
+      flash('Completa todos los campos.', true); return;
     }
-
     setUpdatingReg(true);
-    setErrorMsg('');
-    setSuccessMsg('');
-
     try {
-      const response = await fetch('/api/notion/registrants/update', {
+      const res = await fetch('/api/notion/registrants/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pageId: editingReg.id,
-          name: editName,
-          identification: editId,
-          role: editRole,
-          email: editEmail,
-          status: editStatus
-        })
+        body: JSON.stringify({ pageId: editingReg.id, name: editName, identification: editId, role: editRole, email: editEmail, status: editStatus })
       });
-      const result = await response.json();
-
+      const result = await res.json();
       if (result.success) {
-        setSuccessMsg('Participante actualizado correctamente en Notion.');
-        // Update local state
-        setRegistrants(prev => prev.map(r => r.id === editingReg.id ? {
-          ...r,
-          name: editName,
-          identification: editId,
-          role: editRole,
-          email: editEmail,
-          status: editStatus
-        } : r));
-        setEditingReg(null); // close modal
-        setTimeout(() => setSuccessMsg(''), 5000);
-      } else {
-        setErrorMsg(result.message || 'No se pudo actualizar los campos del participante.');
-      }
-    } catch (err) {
-      setErrorMsg('Fallo de conexión al actualizar participante.');
-    } finally {
-      setUpdatingReg(false);
-    }
+        flash('Participante actualizado en Notion.');
+        setRegistrants(prev => prev.map(r => r.id === editingReg.id ? { ...r, name: editName, identification: editId, role: editRole, email: editEmail, status: editStatus } : r));
+        setEditingReg(null);
+      } else flash(result.message || 'No se pudo actualizar.', true);
+    } catch { flash('Error de conexión.', true); }
+    finally { setUpdatingReg(false); }
   };
 
-  // 5.6. Manually register a single participant into Notion
   const handleManualAddRegistrant = async (e: FormEvent) => {
     e.preventDefault();
-    if (!selectedProjectId) {
-      setAddRegError('No se ha seleccionado ningún taller activo.');
-      return;
-    }
-    if (!addName.trim() || !addId.trim() || !addEmail.trim()) {
-      setAddRegError('Por favor completa todos los campos obligatorios.');
-      return;
-    }
-
+    if (!selectedProjectId) { setAddRegError('No hay taller activo.'); return; }
+    if (!addName.trim() || !addId.trim() || !addEmail.trim()) { setAddRegError('Completa todos los campos.'); return; }
     setAddingReg(true);
     setAddRegError('');
-
     try {
-      const response = await fetch(`/api/notion/projects/${selectedProjectId}/register`, {
+      const res = await fetch(`/api/notion/projects/${selectedProjectId}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: addName.trim(),
-          identification: addId.trim(),
-          role: addRole,
-          email: addEmail.trim()
-        })
+        body: JSON.stringify({ name: addName.trim(), identification: addId.trim(), role: addRole, email: addEmail.trim() })
       });
-      const result = await response.json();
-
+      const result = await res.json();
       if (result.success) {
-        setSuccessMsg('Participante registrado exitosamente en Notion.');
-        // Clear forms
-        setAddName('');
-        setAddId('');
-        setAddRole('estudiante');
-        setAddEmail('');
+        flash('Participante registrado en Notion.');
+        setAddName(''); setAddId(''); setAddRole('estudiante'); setAddEmail('');
         setShowAddRegModal(false);
-        // Refresh registrants list
         await fetchProjectRegistrants(selectedProjectId);
-        setTimeout(() => setSuccessMsg(''), 5000);
-      } else {
-        setAddRegError(result.message || 'No se pudo registrar el participante en Notion.');
-      }
-    } catch (err) {
-      setAddRegError('Fallo de red al registrar participante.');
-    } finally {
-      setAddingReg(false);
-    }
+      } else setAddRegError(result.message || 'No se pudo registrar.');
+    } catch { setAddRegError('Error de conexión.'); }
+    finally { setAddingReg(false); }
   };
 
-  // DRAG & DROP DESIGNER LOGIC
   const handleLogoUpload = (e: any) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    if (file.size > 15 * 1024 * 1024) {
-      alert("El archivo seleccionado supera el límite recomendado de 15MB. Sube una imagen más optimizada.");
-      return;
-    }
-
+    if (file.size > 15 * 1024 * 1024) { alert('Archivo demasiado grande. Máximo 15MB.'); return; }
     const reader = new FileReader();
-    reader.onload = (event: any) => {
-      const updatedSettings = {
-        ...settings,
-        template: {
-          ...settings.template,
-          bgImage: event.target.result
-        }
-      };
-      setSettings(updatedSettings);
-    };
+    reader.onload = (ev: any) => setSettings((prev: any) => ({ ...prev, template: { ...prev.template, bgImage: ev.target.result } }));
     reader.readAsDataURL(file);
   };
 
-  const handleClearTemplateImg = () => {
-    const updatedSettings = {
-      ...settings,
-      template: {
-        ...settings.template,
-        bgImage: null
-      }
-    };
-    setSettings(updatedSettings);
+  const handleBulkUpdate = async (status: 'certificado' | 'incorrecto' | 'recibido') => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setLoading(true);
+    let done = 0;
+    for (const id of ids) {
+      try {
+        await fetch('/api/notion/registrants/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pageId: id, status })
+        });
+        done++;
+      } catch {}
+    }
+    setRegistrants(prev => prev.map(r => selectedIds.has(r.id) ? { ...r, status } : r));
+    setSelectedIds(new Set());
+    setLoading(false);
+    flash(`${done} participante(s) actualizados a "${status === 'certificado' ? 'Certificado' : status === 'incorrecto' ? 'Incorrecto' : 'Recibido'}".`);
   };
 
   const updateFieldProperty = (fieldKey: 'nameField' | 'idField' | 'roleField', property: string, value: any) => {
-    const updatedSettings = {
-      ...settings,
-      template: {
-        ...settings.template,
-        [fieldKey]: {
-          ...settings.template[fieldKey],
-          [property]: value
-        }
-      }
-    };
-    setSettings(updatedSettings);
+    setSettings((prev: any) => ({ ...prev, template: { ...prev.template, [fieldKey]: { ...prev.template[fieldKey], [property]: value } } }));
   };
 
-  // Convert click/drag on aspect frame container to coordinates
   const calculateCoordinates = (clientX: number, clientY: number) => {
     if (!canvasRef.current) return null;
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
-    const y = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100));
     return {
-      x: Math.round(x * 10) / 10,
-      y: Math.round(y * 10) / 10
+      x: Math.round(Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100)) * 10) / 10,
+      y: Math.round(Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100)) * 10) / 10
     };
   };
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Only capture click if not dragging
     if (isDragging) return;
     const coords = calculateCoordinates(e.clientX, e.clientY);
-    if (coords) {
-      updateFieldProperty(activeFieldKey, 'x', coords.x);
-      updateFieldProperty(activeFieldKey, 'y', coords.y);
-    }
+    if (coords) { updateFieldProperty(activeFieldKey, 'x', coords.x); updateFieldProperty(activeFieldKey, 'y', coords.y); }
   };
 
-  // Draggable pointers
   const handlePointerDown = (fieldKey: 'nameField' | 'idField' | 'roleField', e: React.PointerEvent) => {
-    e.stopPropagation();
-    setActiveFieldKey(fieldKey);
-    setIsDragging(true);
+    e.stopPropagation(); setActiveFieldKey(fieldKey); setIsDragging(true);
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging) return;
     const coords = calculateCoordinates(e.clientX, e.clientY);
-    if (coords) {
-      updateFieldProperty(activeFieldKey, 'x', coords.x);
-      updateFieldProperty(activeFieldKey, 'y', coords.y);
-    }
+    if (coords) { updateFieldProperty(activeFieldKey, 'x', coords.x); updateFieldProperty(activeFieldKey, 'y', coords.y); }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    if (isDragging) {
-      setIsDragging(false);
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
+    if (isDragging) { setIsDragging(false); e.currentTarget.releasePointerCapture(e.pointerId); }
   };
 
-  // CSV BATCH PARSING ENGINE
-  const handleCsvTextChange = (text: string) => {
-    setCsvText(text);
-    parseCsvString(text);
-  };
-
-  const handleCsvFileUpload = (e: any) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event: any) => {
-      const text = event.target.result;
-      setCsvText(text);
-      parseCsvString(text);
-    };
-    reader.readAsText(file);
-  };
-
+  // CSV parsing
   const parseCsvString = (text: string) => {
-    if (!text.trim()) {
-      setParsedItems([]);
-      return;
-    }
-
+    if (!text.trim()) { setParsedItems([]); return; }
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length === 0) return;
-
-    // Detect separator (comma or semicolon)
-    let sep = ',';
-    if (lines[0].includes(';')) sep = ';';
-
+    let sep = lines[0].includes(';') ? ';' : ',';
+    const firstCols = lines[0].split(sep).map(c => c.replace(/^["']|["']$/g, '').trim().toLowerCase());
+    const hasHeaders = firstCols.some(c => c.includes('nom') || c.includes('cc') || c.includes('correo') || c.includes('rol'));
+    let headers = hasHeaders ? firstCols : ['nombre', 'identificacion', 'rol', 'correo'];
     const parsed: any[] = [];
-    let headers: string[] = [];
-
-    // Simple heuristic to check if first line is headers
-    const firstLineCols = lines[0].split(sep).map(c => c.replace(/^["']|["']$/g, '').trim().toLowerCase());
-    const hasHeaders = firstLineCols.some(c => c.includes('nom') || c.includes('cc') || c.includes('correo') || c.includes('mail') || c.includes('rol'));
-
-    let startIndex = 0;
-    if (hasHeaders) {
-      headers = firstLineCols;
-      startIndex = 1;
-    } else {
-      headers = ['nombre', 'identificacion', 'rol', 'correo'];
-    }
-
-    for (let i = startIndex; i < lines.length; i++) {
+    for (let i = hasHeaders ? 1 : 0; i < lines.length; i++) {
       const cols = lines[i].split(sep).map(c => c.replace(/^["']|["']$/g, '').trim());
       if (cols.length < 3) continue;
-
       let item: any = { name: '', identification: '', role: 'estudiante', email: '', rowNum: i + 1, valid: true, error: '' };
-
       if (hasHeaders) {
-        headers.forEach((h, colIdx) => {
-          const val = cols[colIdx] || '';
+        headers.forEach((h, ci) => {
+          const val = cols[ci] || '';
           if (h.includes('nom')) item.name = val;
           else if (h.includes('cc') || h.includes('ident') || h.includes('doc')) item.identification = val;
           else if (h.includes('rol')) item.role = val.toLowerCase();
           else if (h.includes('cor') || h.includes('mail')) item.email = val;
         });
       } else {
-        item.name = cols[0] || '';
-        item.identification = cols[1] || '';
-        item.role = (cols[2] || '').toLowerCase();
-        item.email = cols[3] || '';
+        [item.name, item.identification, item.role, item.email] = [cols[0], cols[1], (cols[2] || '').toLowerCase(), cols[3] || ''];
       }
-
-      // Normalization of roles
-      if (item.role.includes('est') || item.role.includes('es')) {
-        item.role = 'estudiante';
-      } else if (item.role.includes('egr') || item.role.includes('eg')) {
-        item.role = 'egresado';
-      } else if (item.role.includes('emp') || item.role.includes('pres')) {
-        item.role = 'empresario';
-      } else {
-        item.role = 'estudiante'; // defaults
-      }
-
-      // Simple validation rules
-      if (!item.name) {
-        item.valid = false;
-        item.error += 'Falta Nombre. ';
-      }
-      if (!item.identification) {
-        item.valid = false;
-        item.error += 'Falta Identificación. ';
-      }
-      if (!item.email || !item.email.includes('@')) {
-        item.valid = false;
-        item.error += 'Correo inválido. ';
-      }
-
+      if (item.role.includes('egr')) item.role = 'egresado';
+      else if (item.role.includes('emp')) item.role = 'empresario';
+      else item.role = 'estudiante';
+      if (!item.name) { item.valid = false; item.error += 'Falta Nombre. '; }
+      if (!item.identification) { item.valid = false; item.error += 'Falta ID. '; }
+      if (!item.email || !item.email.includes('@')) { item.valid = false; item.error += 'Correo inválido. '; }
       parsed.push(item);
     }
-
     setParsedItems(parsed);
   };
 
   const handleExecuteBulkRegister = async () => {
-    if (!selectedProjectId) {
-      setBulkStatus({ status: 'error', message: 'No se ha seleccionado ningún proyecto activo.' });
-      return;
-    }
+    if (!selectedProjectId) { setBulkStatus({ status: 'error', message: 'No hay proyecto activo.' }); return; }
     const validItems = parsedItems.filter(item => item.valid);
-    if (validItems.length === 0) {
-      setBulkStatus({ status: 'error', message: 'No hay registros válidos cargados para procesar.' });
-      return;
-    }
-
-    setBulkStatus({ status: 'processing', message: `Insertando ${validItems.length} registros directamente en la tabla de Notion...` });
-
+    if (validItems.length === 0) { setBulkStatus({ status: 'error', message: 'No hay registros válidos.' }); return; }
+    setBulkStatus({ status: 'processing', message: `Insertando ${validItems.length} registros en Notion...` });
     try {
       const res = await fetch(`/api/notion/projects/${selectedProjectId}/bulk`, {
         method: 'POST',
@@ -649,372 +428,293 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
         body: JSON.stringify({ items: validItems })
       });
       const data = await res.json();
-      
       if (data.success) {
-        setBulkStatus({ 
-          status: 'success', 
-          message: `¡Carga masiva en Notion completada! ${validItems.length} registros guardados exitosamente transaccionalmente.` 
-        });
-        setCsvText('');
-        setParsedItems([]);
+        setBulkStatus({ status: 'success', message: `¡${validItems.length} registros guardados en Notion!` });
+        setCsvText(''); setParsedItems([]);
         fetchProjectRegistrants(selectedProjectId);
-      } else {
-        setBulkStatus({ status: 'error', message: data.message || 'Ocurrió un error en Notion.' });
-      }
-    } catch (e) {
-      setBulkStatus({ status: 'error', message: 'Fallo de conectividad en el lote hacia Notion.' });
-    }
+      } else setBulkStatus({ status: 'error', message: data.message || 'Error en Notion.' });
+    } catch { setBulkStatus({ status: 'error', message: 'Fallo de conexión.' }); }
   };
 
-  // Metrics
   const totalCount = registrants.length;
-  const correctCount = registrants.filter(r => r.status === 'correcto').length;
+  const certCount = registrants.filter(r => r.status === 'certificado').length;
   const receivedCount = registrants.filter(r => r.status === 'recibido').length;
+  const incorrectCount = registrants.filter(r => r.status === 'incorrecto').length;
+
+  const currentProject = projects.find(p => p.id === selectedProjectId);
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-950 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200" id="admin-view-root">
-      
-      {/* Dynamic Top Bar */}
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-sm dark:shadow-md">
+    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-950 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
+
+      {/* ── Top Header ────────────────────────────────────────────────── */}
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 md:px-6 py-3 flex flex-wrap gap-3 justify-between items-center shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-pink-600 flex items-center justify-center font-bold text-white shadow-md">
-            UD
-          </div>
+          <div className="w-9 h-9 rounded-lg bg-pink-600 flex items-center justify-center font-black text-white text-sm shadow">UD</div>
           <div>
-            <h1 className="text-lg font-bold tracking-tight text-slate-950 dark:text-white flex items-center gap-2">
-              Panel Administrativo <span className="text-xs bg-pink-500/10 dark:bg-pink-500/20 text-pink-600 dark:text-pink-400 px-2 py-0.5 rounded border border-pink-500/30 font-mono">Control Total</span>
-            </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Universidad de Nariño — Coordinación de Asistencias & Certificaciones</p>
+            <h1 className="text-base font-bold text-slate-900 dark:text-white leading-tight">Panel Administrativo</h1>
+            <p className="text-[10px] text-slate-400">Universidad de Nariño — Certificaciones Digitales</p>
           </div>
         </div>
 
-        {/* Dynamic Project Selector */}
-        <div className="flex-1 max-w-xs mx-auto sm:mx-0 sm:ml-4 flex items-center bg-slate-50 dark:bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm focus-within:ring-1 focus-within:ring-pink-500/50 transition-all font-sans">
-          <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2 border-r border-slate-200 dark:border-slate-800">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap select-none">Proyecto:</span>
-            <select 
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="w-full bg-transparent text-xs font-extrabold text-slate-800 dark:text-white border-0 p-0 m-0 focus:outline-none focus:ring-0 cursor-pointer truncate"
-            >
-              {projects.length === 0 ? (
-                <option value="">Cargando proyectos...</option>
-              ) : (
-                projects.map(p => (
-                  <option key={p.id} value={p.id} className="bg-white dark:bg-slate-900">{p.title}</option>
-                ))
-              )}
-            </select>
-          </div>
-          <button
-            onClick={() => setShowCreateProjectModal(true)}
-            className="pl-2 pr-0.5 text-pink-600 hover:text-pink-700 dark:text-pink-400 dark:hover:text-pink-300 transition-colors cursor-pointer flex items-center justify-center font-bold"
-            title="Crear nuevo taller directamente en Notion"
+        {/* Project Selector */}
+        <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5 min-w-[220px] max-w-sm flex-1 md:flex-none">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Proyecto:</span>
+          <select
+            value={selectedProjectId}
+            onChange={e => setSelectedProjectId(e.target.value)}
+            className="flex-1 bg-transparent text-xs font-bold text-slate-800 dark:text-white border-0 p-0 focus:outline-none focus:ring-0 cursor-pointer truncate"
           >
-            <Plus className="w-4 h-4 font-extrabold" />
+            {projects.length === 0
+              ? <option value="">Cargando...</option>
+              : projects.map(p => <option key={p.id} value={p.id} className="bg-white dark:bg-slate-900">{p.title}</option>)
+            }
+          </select>
+          <button onClick={() => setShowCreateProjectModal(true)} className="text-pink-500 hover:text-pink-700 transition-colors" title="Crear proyecto">
+            <Plus className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBackToRegistry}
-            id="admin-btn-back"
-            className="text-xs font-semibold py-2 px-4 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all border border-slate-200 dark:border-slate-700 cursor-pointer shadow-sm"
-          >
-            Volver al Registro Público
+        <div className="flex items-center gap-2">
+          <button onClick={onBackToRegistry} className="text-xs font-semibold px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 transition-all cursor-pointer">
+            ← Registro Público
           </button>
-          <button
-            onClick={fetchData}
-            id="admin-btn-refresh"
-            className="p-2 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all border border-slate-200 dark:border-slate-700 cursor-pointer shadow-sm"
-            title="Refrescar Datos"
-          >
+          <button onClick={() => { fetchProjectsList(); if (selectedProjectId) fetchProjectRegistrants(selectedProjectId); }}
+            className="p-2 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 transition-all cursor-pointer" title="Refrescar">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            title="Cambiar Tema (Oscuro/Claro)"
-            className="p-2 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center cursor-pointer shadow-sm"
-          >
-            {darkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-indigo-500" />}
+          <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer" title="Tema">
+            {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
           </button>
         </div>
       </header>
 
-      {/* Main Core Layout: Sidebar + Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
-        
-        {/* SIDEBAR NAVIGATION BLOCK */}
-        <div className="lg:col-span-1 flex flex-col gap-4">
-          
-          {/* Quick Stats Panel */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-md">
-            <h3 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
-              <Activity className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              Métricas Activas
-            </h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-2.5 rounded bg-slate-50 dark:bg-slate-950/80 border border-slate-100 dark:border-slate-800/40 shadow-inner">
-                <span className="text-xs text-slate-500 dark:text-slate-400">Total Solicitudes</span>
-                <span className="text-sm font-bold font-mono text-slate-900 dark:text-white">{totalCount}</span>
-              </div>
-              <div className="flex items-center justify-between p-2.5 rounded bg-slate-50 dark:bg-slate-950/80 border border-slate-100 dark:border-slate-800/40 shadow-inner">
-                <span className="text-xs text-slate-500 dark:text-slate-400">Correcto / Enviado</span>
-                <span className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-400">{correctCount}</span>
-              </div>
-              <div className="flex items-center justify-between p-2.5 rounded bg-slate-50 dark:bg-slate-950/80 border border-slate-100 dark:border-slate-800/40 shadow-inner">
-                <span className="text-xs text-slate-500 dark:text-slate-400">Recibidos (Pendientes)</span>
-                <span className="text-sm font-bold font-mono text-amber-600 dark:text-amber-500">{receivedCount}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Core Tab Group Buttons */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl p-2 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
-            <button
-              onClick={() => { setActiveTab('registrants'); setPreviewingCert(null); }}
-              className={`w-full text-left py-3 px-4 rounded-lg flex items-center justify-between font-semibold text-xs transition-all cursor-pointer ${
-                activeTab === 'registrants' 
-                  ? 'bg-pink-50 dark:bg-pink-600/10 text-pink-600 dark:text-pink-300 border-l-4 border-pink-500 font-bold' 
-                  : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4" />
-                <span>Control de Asistentes</span>
-              </div>
-              <span className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] px-2 py-0.5 rounded-full font-bold font-mono">
-                {totalCount}
-              </span>
-            </button>
-
-            <button
-              onClick={() => { setActiveTab('designer'); setPreviewingCert(null); }}
-              className={`w-full text-left py-3 px-4 rounded-lg flex items-center justify-between font-semibold text-xs transition-all cursor-pointer ${
-                activeTab === 'designer' 
-                  ? 'bg-pink-50 dark:bg-pink-600/10 text-pink-600 dark:text-pink-300 border-l-4 border-pink-500 font-bold' 
-                  : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4" />
-                <span>Diseñador del Certificado</span>
-              </div>
-              {settings.template?.bgImage ? (
-                <span className="bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[9px] px-2 py-0.5 rounded font-mono uppercase tracking-wider font-extrabold border border-emerald-500/30">Activo</span>
-              ) : (
-                <span className="bg-slate-100 dark:bg-slate-800 text-slate-500 text-[9px] px-2 py-0.5 rounded font-mono uppercase">Por Defecto</span>
-              )}
-            </button>
-
-            <button
-              onClick={() => { setActiveTab('bulk'); setPreviewingCert(null); }}
-              className={`w-full text-left py-3 px-4 rounded-lg flex items-center justify-between font-semibold text-xs transition-all cursor-pointer ${
-                activeTab === 'bulk' 
-                  ? 'bg-pink-50 dark:bg-pink-600/10 text-pink-600 dark:text-pink-300 border-l-4 border-pink-500 font-bold' 
-                  : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>Carga en Lote (CSV)</span>
-              </div>
-            </button>
-
-            <button
-              onClick={() => { setActiveTab('settings'); setPreviewingCert(null); }}
-              className={`w-full text-left py-3 px-4 rounded-lg flex items-center justify-between font-semibold text-xs transition-all cursor-pointer ${
-                activeTab === 'settings' 
-                  ? 'bg-pink-50 dark:bg-pink-600/10 text-pink-600 dark:text-pink-300 border-l-4 border-pink-500 font-bold' 
-                  : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <SettingsIcon className="w-4 h-4" />
-                <span>Código Diario de Registro</span>
-              </div>
-            </button>
-          </div>
-
-          {/* Active Code Box */}
-          <div className="bg-gradient-to-br from-indigo-950 to-pink-950 border border-indigo-500/20 rounded-xl p-4 shadow-md text-slate-100 text-center space-y-2">
-            <div className="flex items-center justify-center gap-2 text-indigo-300">
-              <Key className="w-4 h-4 animate-pulse" />
-              <h4 className="text-xs font-bold uppercase tracking-widest">Código de Hoy</h4>
-            </div>
-            <div className="bg-black/45 rounded-lg p-2.5 border border-white/5">
-              <p className="font-mono text-lg font-black tracking-widest text-white selection:bg-indigo-600">{settings.dailyCode || 'DEPADISE2026'}</p>
-            </div>
-            <p className="text-[10px] text-slate-300 leading-normal">
-              Código indispensable que deben ingresar los asistentes públicos.
-            </p>
-          </div>
+      {/* ── Tab Navigation ─────────────────────────────────────────────── */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 md:px-6 flex items-center gap-1 overflow-x-auto">
+        {([
+          { key: 'registrants', icon: Users, label: 'Participantes', badge: totalCount },
+          { key: 'designer', icon: Layers, label: 'Diseñador Cert.' },
+          { key: 'bulk', icon: FileSpreadsheet, label: 'Carga CSV' },
+          { key: 'settings', icon: SettingsIcon, label: 'Configuración' }
+        ] as const).map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => { setActiveTab(tab.key as TabType); setPreviewingCert(null); }}
+            className={`flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 transition-all cursor-pointer ${
+              activeTab === tab.key
+                ? 'border-pink-500 text-pink-600 dark:text-pink-400'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:border-slate-300'
+            }`}
+          >
+            <tab.icon className="w-3.5 h-3.5" />
+            {tab.label}
+            {'badge' in tab && tab.badge !== undefined && (
+              <span className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[9px] px-1.5 py-0.5 rounded-full font-mono">{tab.badge}</span>
+            )}
+          </button>
+        ))}
+        {/* Daily code chip in tab bar */}
+        <div className="ml-auto flex items-center gap-2 py-2 pl-4 border-l border-slate-200 dark:border-slate-800 shrink-0">
+          <Key className="w-3.5 h-3.5 text-pink-500" />
+          <span className="text-[10px] text-slate-400 font-medium">Código hoy:</span>
+          <code className="text-xs font-black font-mono text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/20 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800/40 tracking-widest">{settings.dailyCode || '...'}</code>
         </div>
+      </div>
 
-        {/* ACTIVE WORKSPACE WORKPAD */}
-        <div className="lg:col-span-3 flex flex-col gap-6">
-          
-          {/* Messages Alert Panels */}
+      {/* ── Messages ───────────────────────────────────────────────────── */}
+      {(errorMsg || successMsg) && (
+        <div className="px-4 md:px-6 pt-3">
           {errorMsg && (
-            <div className="bg-red-950/40 border border-red-500/30 rounded-lg p-3 text-sm text-red-300 flex items-center gap-2">
-              <X className="w-4 h-4 shrink-0" />
-              <span>{errorMsg}</span>
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/40 rounded-lg p-3 text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
+              <X className="w-4 h-4 shrink-0" /> {errorMsg}
             </div>
           )}
           {successMsg && (
-            <div className="bg-emerald-950/40 border border-emerald-500/20 rounded-lg p-3 text-sm text-emerald-300 flex items-center gap-2 animate-fade-in">
-              <Check className="w-4 h-4 shrink-0" />
-              <span>{successMsg}</span>
+            <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-lg p-3 text-sm text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+              <Check className="w-4 h-4 shrink-0" /> {successMsg}
             </div>
           )}
+        </div>
+      )}
 
-          {/* TAB 1: REGISTRANTS MANAGEMENT TABLE */}
-          {activeTab === 'registrants' && !previewingCert && (
-            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-md overflow-hidden">
-               <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                 <div>
-                   <h2 className="font-bold text-slate-900 dark:text-white text-base">Asistencia y Listado Público</h2>
-                   <p className="text-xs text-slate-500 dark:text-slate-400">Verifica, elimina, aprueba, edita o registra participantes para firmas de certificados.</p>
-                 </div>
-                 <div className="flex items-center gap-2">
-                   <button
-                     onClick={() => {
-                       setAddName('');
-                       setAddId('');
-                       setAddRole('estudiante');
-                       setAddEmail('');
-                       setAddRegError('');
-                       setShowAddRegModal(true);
-                     }}
-                     className="text-xs font-bold px-3 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded border border-pink-500 selection:bg-pink-800 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                   >
-                     <UserPlus className="w-3.5 h-3.5" />
-                     Manual
-                   </button>
-                   <div className="text-xs font-semibold px-3 py-1.5 bg-pink-50 dark:bg-slate-950 rounded text-pink-600 dark:text-pink-400 border border-pink-100 dark:border-slate-800">
-                     Total inscritos: {totalCount}
-                   </div>
-                 </div>
-               </div>
+      {/* ── Main Content ───────────────────────────────────────────────── */}
+      <main className="flex-1 p-4 md:p-6">
+
+        {/* ════ TAB: REGISTRANTS ════════════════════════════════════════ */}
+        {activeTab === 'registrants' && !previewingCert && (
+          <div className="flex flex-col gap-5">
+
+            {/* Stats row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: 'Total', value: totalCount, color: 'text-slate-700 dark:text-white', bg: 'bg-white dark:bg-slate-900', icon: Users },
+                { label: 'Certificados', value: certCount, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-950/30', icon: Award },
+                { label: 'Recibidos', value: receivedCount, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-950/30', icon: Clock },
+                { label: 'Incorrectos', value: incorrectCount, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-950/30', icon: AlertTriangle }
+              ].map(s => (
+                <div key={s.label} className={`${s.bg} rounded-xl p-4 border border-slate-200 dark:border-slate-800 flex items-center gap-3 shadow-sm`}>
+                  <s.icon className={`w-5 h-5 ${s.color} shrink-0`} />
+                  <div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{s.label}</p>
+                    <p className={`text-xl font-black font-mono ${s.color}`}>{s.value}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Table card */}
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div>
+                  <h2 className="font-bold text-slate-900 dark:text-white text-base">
+                    {currentProject ? `Participantes — ${currentProject.title}` : 'Participantes'}
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Gestiona, certifica o marca participantes del proyecto activo.</p>
+                </div>
+                <button
+                  onClick={() => { setAddName(''); setAddId(''); setAddRole('estudiante'); setAddEmail(''); setAddRegError(''); setShowAddRegModal(true); }}
+                  className="text-xs font-bold px-3 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded border border-pink-500 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm shrink-0"
+                >
+                  <UserPlus className="w-3.5 h-3.5" /> Agregar manual
+                </button>
+              </div>
 
               {registrants.length === 0 ? (
-                <div className="p-16 text-center text-slate-500 flex flex-col items-center justify-center">
-                  <Users className="w-12 h-12 text-slate-300 dark:text-slate-700 mb-3" />
-                  <p className="text-sm font-semibold text-slate-850 dark:text-slate-200">No se han registrado participantes todavía.</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Usa la interfaz pública con tu código activo para poblar la base de datos.</p>
+                <div className="p-16 text-center flex flex-col items-center gap-3">
+                  <Users className="w-12 h-12 text-slate-200 dark:text-slate-700" />
+                  <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Sin participantes aún.</p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500">Los registros aparecen aquí cuando alguien completa el formulario público.</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 dark:bg-slate-950/60 text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-100 dark:border-slate-800">
+                <>
+                  {/* Bulk action toolbar */}
+                  {selectedIds.size > 0 && (
+                    <div className="px-5 py-2.5 bg-pink-50 dark:bg-pink-950/20 border-b border-pink-200 dark:border-pink-800/30 flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-pink-700 dark:text-pink-300">{selectedIds.size} seleccionado(s)</span>
+                      <div className="flex gap-1.5 ml-auto flex-wrap">
+                        <button onClick={() => handleBulkUpdate('certificado')}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm">
+                          <Award className="w-3 h-3" /> Certificar seleccionados
+                        </button>
+                        <button onClick={() => handleBulkUpdate('incorrecto')}
+                          className="bg-red-500 hover:bg-red-600 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm">
+                          <X className="w-3 h-3" /> Marcar incorrectos
+                        </button>
+                        <button onClick={() => handleBulkUpdate('recibido')}
+                          className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm">
+                          <Clock className="w-3 h-3" /> Pasar a recibido
+                        </button>
+                        <button onClick={() => setSelectedIds(new Set())}
+                          className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer border border-slate-200 dark:border-slate-700 transition-all">
+                          <X className="w-3 h-3" /> Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-950/60 text-slate-500 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider border-b border-slate-100 dark:border-slate-800">
                       <tr>
-                        <th className="px-5 py-3.5">Nombre / Identificación</th>
-                        <th className="px-5 py-3.5">Rol de Asistencia</th>
-                        <th className="px-5 py-3.5">Correo Electrónico</th>
-                        <th className="px-5 py-3.5">Estado Envío</th>
-                        <th className="px-5 py-3.5 text-right">Acciones</th>
+                        <th className="px-3 py-3.5 w-9">
+                          <input type="checkbox"
+                            checked={registrants.length > 0 && selectedIds.size === registrants.length}
+                            ref={el => { if (el) el.indeterminate = selectedIds.size > 0 && selectedIds.size < registrants.length; }}
+                            onChange={e => setSelectedIds(e.target.checked ? new Set(registrants.map(r => r.id)) : new Set())}
+                            className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 accent-pink-600 cursor-pointer"
+                          />
+                        </th>
+                        <th className="px-5 py-3.5">Participante</th>
+                        <th className="px-4 py-3.5">Rol</th>
+                        <th className="px-4 py-3.5">Correo</th>
+                        <th className="px-4 py-3.5">Estado</th>
+                        <th className="px-4 py-3.5">Generado</th>
+                        <th className="px-4 py-3.5 text-right">Acciones</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                      {registrants.map((reg) => (
-                        <tr key={reg.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
-                          <td className="px-5 py-3.5">
-                            <div className="font-semibold text-slate-900 dark:text-white">{reg.name}</div>
-                            <div className="text-xs font-mono text-slate-500 dark:text-slate-400 mt-0.5">
-                              C.C. {reg.identification}
-                            </div>
+                      {registrants.map(reg => (
+                        <tr key={reg.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors ${selectedIds.has(reg.id) ? 'bg-pink-50/60 dark:bg-pink-950/10' : ''}`}>
+                          <td className="px-3 py-3.5">
+                            <input type="checkbox"
+                              checked={selectedIds.has(reg.id)}
+                              onChange={e => setSelectedIds(prev => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(reg.id); else next.delete(reg.id);
+                                return next;
+                              })}
+                              className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 accent-pink-600 cursor-pointer"
+                            />
                           </td>
                           <td className="px-5 py-3.5">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded capitalize border ${
-                              reg.role === 'empresario' ? 'bg-amber-100/40 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/25' :
-                              reg.role === 'egresado' ? 'bg-pink-100/40 dark:bg-pink-500/10 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-500/25' :
-                              'bg-indigo-100/40 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-500/25'
-                            }`}>
-                              {reg.role}
-                            </span>
+                            <div className="font-semibold text-slate-900 dark:text-white text-sm">{reg.name}</div>
+                            <div className="text-[10px] font-mono text-slate-400 mt-0.5">C.C. {reg.identification}</div>
                           </td>
-                          <td className="px-5 py-3.5 text-slate-600 dark:text-slate-300 font-mono text-xs">
-                            {reg.email}
+                          <td className="px-4 py-3.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border capitalize ${
+                              reg.role === 'empresario' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-700/30' :
+                              reg.role === 'egresado' ? 'bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-700/30' :
+                              'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-700/30'
+                            }`}>{reg.role}</span>
                           </td>
-                          <td className="px-5 py-3.5">
+                          <td className="px-4 py-3.5 text-xs font-mono text-slate-500 dark:text-slate-400">{reg.email}</td>
+                          <td className="px-4 py-3.5">
                             <div className="flex items-center gap-1.5">
-                              <span className={`w-2 h-2 rounded-full ${
-                                reg.status === 'correcto' ? 'bg-emerald-500' : 
-                                reg.status === 'incorrecto' ? 'bg-rose-500' : 'bg-amber-500'
+                              <span className={`w-2 h-2 rounded-full shrink-0 ${
+                                reg.status === 'certificado' ? 'bg-emerald-500' :
+                                reg.status === 'incorrecto' ? 'bg-red-500' : 'bg-amber-400'
                               }`} />
                               <span className={`text-xs font-semibold capitalize ${
-                                reg.status === 'correcto' ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 
-                                reg.status === 'incorrecto' ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-amber-600 dark:text-amber-500'
+                                reg.status === 'certificado' ? 'text-emerald-600 dark:text-emerald-400' :
+                                reg.status === 'incorrecto' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
                               }`}>
-                                {reg.status === 'correcto' ? 'Establecido como Certificado' : 
-                                 reg.status === 'incorrecto' ? 'Datos Incorrectos' : 'Recibido'}
+                                {reg.status === 'certificado' ? 'Certificado' : reg.status === 'incorrecto' ? 'Incorrecto' : 'Recibido'}
                               </span>
                             </div>
-                            <span className="text-[9px] text-slate-400 dark:text-slate-500 block mt-0.5">
-                              {reg.id}
-                            </span>
                           </td>
-                          <td className="px-5 py-3.5 text-right">
-                            <div className="flex justify-end items-center gap-2">
-                              {reg.status !== 'correcto' && (
+                          <td className="px-4 py-3.5">
+                            {(reg as any).generatedAt
+                              ? <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">{(reg as any).generatedAt}</span>
+                              : <span className="text-[10px] text-slate-300 dark:text-slate-600">—</span>
+                            }
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <div className="flex justify-end items-center gap-1.5 flex-wrap">
+                              {reg.status !== 'certificado' && (
                                 <button
-                                  onClick={() => handleUpdateStatus(reg.id, 'correcto')}
-                                  id={`btn-approve-${reg.id}`}
-                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs py-1.5 px-3 rounded flex items-center gap-1 transition-all cursor-pointer shadow-sm"
-                                  title="Aprobar y generar certificado"
+                                  onClick={() => handleCertify(reg.id)}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[10px] py-1.5 px-2.5 rounded flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                                  title="Certificar participante"
                                 >
-                                  <Check className="w-3.5 h-3.5" />
-                                  Aprobar Certificado
+                                  <Award className="w-3 h-3" /> Certificar
                                 </button>
                               )}
-
-                              {reg.status === 'correcto' && (
-                                <span className="text-xs text-slate-400 dark:text-slate-500 font-semibold italic border border-dashed border-slate-200 dark:border-slate-800 rounded px-2.5 py-1 select-none">
-                                  Certificado Generado
+                              {reg.status === 'certificado' && (
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-200 dark:border-emerald-800/40 px-2 py-1 rounded">
+                                  ✓ Certificado
                                 </span>
                               )}
-
-                              {reg.status !== 'incorrecto' && reg.status !== 'correcto' && (
+                              {reg.status === 'recibido' && (
                                 <button
-                                  onClick={() => handleUpdateStatus(reg.id, 'incorrecto')}
-                                  className="bg-rose-50 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400 font-semibold text-xs py-1.5 px-3 rounded flex items-center gap-1 transition-all border border-rose-100 dark:border-rose-900/30 cursor-pointer shadow-sm"
-                                  title="Marcar con datos incorrectos para corrección"
+                                  onClick={() => handleMarkIncorrect(reg.id)}
+                                  className="bg-red-50 dark:bg-red-950/20 hover:bg-red-100 text-red-600 dark:text-red-400 font-semibold text-[10px] py-1.5 px-2.5 rounded flex items-center gap-1 transition-all border border-red-100 dark:border-red-900/30 cursor-pointer shadow-sm"
                                 >
-                                  <X className="w-3.5 h-3.5" />
-                                  Incorrecto
+                                  <X className="w-3 h-3" /> Incorrecto
                                 </button>
                               )}
-
                               <button
-                                onClick={() => {
-                                  setEditingReg(reg);
-                                  setEditName(reg.name);
-                                  setEditId(reg.identification);
-                                  setEditRole(reg.role);
-                                  setEditEmail(reg.email);
-                                  setEditStatus(reg.status);
-                                }}
-                                className="bg-slate-105 hover:bg-slate-205 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-705 dark:text-slate-300 font-semibold text-xs py-1.5 px-2.5 rounded flex items-center gap-1 transition-all border border-slate-200 dark:border-slate-700 cursor-pointer shadow-sm"
-                                title="Editar Datos Participante"
+                                onClick={() => { setEditingReg(reg); setEditName(reg.name); setEditId(reg.identification); setEditRole(reg.role); setEditEmail(reg.email); setEditStatus(reg.status as any); }}
+                                className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-[10px] py-1.5 px-2.5 rounded flex items-center gap-1 transition-all border border-slate-200 dark:border-slate-700 cursor-pointer shadow-sm"
                               >
-                                <Pencil className="w-3.5 h-3.5 text-pink-500" />
-                                Editar
+                                <Pencil className="w-3 h-3 text-pink-500" /> Editar
                               </button>
-
                               <button
                                 onClick={() => setPreviewingCert(reg)}
-                                id={`btn-preview-${reg.id}`}
-                                className="bg-indigo-50 dark:bg-indigo-900/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 font-semibold text-xs py-1.5 px-2.5 rounded flex items-center gap-1 transition-all border border-indigo-100 dark:border-indigo-700/35 cursor-pointer shadow-sm"
-                                title="Ver Certificado"
+                                className="bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 font-semibold text-[10px] py-1.5 px-2.5 rounded flex items-center gap-1 transition-all border border-indigo-100 dark:border-indigo-700/30 cursor-pointer shadow-sm"
                               >
-                                <Eye className="w-3.5 h-3.5" />
-                                Ver
+                                <Eye className="w-3 h-3" /> Ver
                               </button>
-
                               <button
                                 onClick={() => handleDeleteRegistrant(reg.id, reg.name)}
-                                className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-500/10 p-1.5 rounded transition-colors cursor-pointer"
-                                title="Eliminar del Registro de Notion"
+                                className="text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 p-1.5 rounded transition-colors cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -1025,674 +725,418 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* DYNAMIC VIEW PREVIEW PORTAL */}
-          {previewingCert && (
-            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-lg">
-              <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
-                <div>
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
-                    <Sparkles className="w-4.5 h-4.5 text-pink-500 dark:text-pink-400" />
-                    Vista Previa de Certificado
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Asistente: <span className="text-slate-800 dark:text-white font-semibold">{previewingCert.name}</span> | CC: <span className="font-mono">{previewingCert.identification}</span></p>
-                </div>
-                <button
-                  onClick={() => setPreviewingCert(null)}
-                  className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-3 py-1.5 text-xs font-semibold rounded border border-slate-200 dark:border-slate-700 cursor-pointer shadow-sm"
-                >
-                  Cerrar Previsualización
-                </button>
+        {/* Preview certificate (overlay within registrants) */}
+        {activeTab === 'registrants' && previewingCert && (
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-lg">
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-pink-500" /> Vista Previa
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">{previewingCert.name} — C.C. {previewingCert.identification}</p>
               </div>
-
-              <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-850 flex justify-center shadow-inner">
-                <CertificateTemplate
-                  name={previewingCert.name}
-                  identification={previewingCert.identification}
-                  role={previewingCert.role}
-                  id={previewingCert.id}
-                  templateConfig={settings.template}
-                />
-              </div>
+              <button onClick={() => setPreviewingCert(null)} className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-3 py-1.5 text-xs font-semibold rounded border border-slate-200 dark:border-slate-700 cursor-pointer">
+                Cerrar
+              </button>
             </div>
-          )}
-
-          {/* TAB 2: INTERACTIVE CERTIFICATE DESIGNER */}
-          {activeTab === 'designer' && (
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-              
-              {/* Controls Column */}
-              <div className="xl:col-span-5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 space-y-6 shadow-md h-fit">
-                <div>
-                  <h2 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
-                    <Layers className="w-5 h-5 text-pink-500" />
-                    Diseño y Posicionamiento
-                  </h2>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    Inserta el diseño del certificado, selecciona variables y colócalas arrastrándolas o afinando sus ejes.
-                  </p>
-                </div>
-
-                {/* Uploder Base image */}
-                <div className="space-y-2">
-                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Imagen de Fondo Base (Template)</label>
-                  {!settings.template?.bgImage ? (
-                    <div className="border border-dashed border-slate-300 dark:border-slate-700 hover:border-pink-500 rounded-lg p-5 text-center transition-all bg-slate-50/60 dark:bg-slate-950/50">
-                      <input 
-                        type="file" 
-                        accept="image/*" 
-                        id="bg-upload-field" 
-                        className="hidden" 
-                        onChange={handleLogoUpload}
-                      />
-                      <label htmlFor="bg-upload-field" className="cursor-pointer flex flex-col items-center justify-center gap-1">
-                        <Upload className="w-8 h-8 text-pink-500 hover:scale-105 transition-transform" />
-                        <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-1">Elegir Archivo PNG o JPG</span>
-                        <span className="text-[10px] text-slate-500 mt-0.5">Se recomienda fondo HD optimizado (1920x1080)</span>
-                      </label>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <div className="w-12 h-12 bg-slate-200 dark:bg-slate-900 border border-slate-350 dark:border-slate-800 rounded overflow-hidden flex items-center justify-center">
-                          <img src={settings.template.bgImage} className="w-full h-full object-cover" alt="fondo" referrerPolicy="no-referrer" />
-                        </div>
-                        <div>
-                          <span className="text-xs font-bold text-slate-900 dark:text-white block">Diseño subido</span>
-                          <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-mono">Formato Base64 Activo</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={handleClearTemplateImg}
-                        className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-red-500 dark:text-red-400 text-xs py-1 px-2.5 rounded border border-slate-200 dark:border-slate-800 cursor-pointer transition-colors shadow-sm"
-                      >
-                        Remover
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Variable Selector */}
-                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Variable Activa para Posicionar</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { key: 'nameField', label: 'Nombre' },
-                      { key: 'idField', label: 'Cédula / ID' },
-                      { key: 'roleField', label: 'Rol / Cargo' }
-                    ].map((f) => (
-                      <button
-                        key={f.key}
-                        type="button"
-                        onClick={() => setActiveFieldKey(f.key as any)}
-                        className={`py-2 px-1 text-xs font-bold rounded border transition-all text-center cursor-pointer ${
-                          activeFieldKey === f.key
-                            ? 'bg-pink-50 dark:bg-pink-600/10 border-pink-500 text-pink-600 dark:text-pink-300'
-                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-850 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900'
-                        }`}
-                      >
-                        {f.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Range sliders */}
-                <div className="space-y-4 p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-205 dark:border-slate-850 shadow-inner">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-extrabold text-pink-600 dark:text-pink-400 capitalize">Ejes de: {activeFieldKey === 'nameField' ? 'Nombre' : activeFieldKey === 'idField' ? 'Cédula' : 'Rol'}</span>
-                    <label className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
-                      <input 
-                        type="checkbox"
-                        checked={settings.template[activeFieldKey]?.enabled}
-                        onChange={(e) => updateFieldProperty(activeFieldKey, 'enabled', e.target.checked)}
-                      />
-                      Habilitado
-                    </label>
-                  </div>
-
-                  <div className="space-y-3.5 text-xs">
-                    {/* Position X Slider */}
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between text-slate-500 dark:text-slate-400 text-[11px] font-medium">
-                        <span>Alineación Horizontal (Posición X %)</span>
-                        <span className="font-mono text-pink-600 dark:text-pink-300 font-bold">{settings.template[activeFieldKey]?.x}%</span>
-                      </div>
-                      <input 
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="0.5"
-                        value={settings.template[activeFieldKey]?.x || 50}
-                        onChange={(e) => updateFieldProperty(activeFieldKey, 'x', parseFloat(e.target.value))}
-                        className="w-full accent-pink-500 cursor-pointer"
-                      />
-                    </div>
-
-                    {/* Position Y Slider */}
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between text-slate-500 dark:text-slate-400 text-[11px] font-medium">
-                        <span>Alineación Vertical (Posición Y %)</span>
-                        <span className="font-mono text-pink-600 dark:text-pink-300 font-bold">{settings.template[activeFieldKey]?.y}%</span>
-                      </div>
-                      <input 
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="0.5"
-                        value={settings.template[activeFieldKey]?.y || 50}
-                        onChange={(e) => updateFieldProperty(activeFieldKey, 'y', parseFloat(e.target.value))}
-                        className="w-full accent-pink-500 cursor-pointer"
-                      />
-                    </div>
-
-                    {/* Custom Properties Row */}
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <div>
-                        <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Tamaño de Fuente (pt)</label>
-                        <input 
-                          type="number"
-                          value={settings.template[activeFieldKey]?.fontSize || 20}
-                          onChange={(e) => updateFieldProperty(activeFieldKey, 'fontSize', parseInt(e.target.value) || 12)}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded font-mono text-slate-900 dark:text-white text-xs px-2.5 py-1 focus:ring-1 focus:ring-pink-500 focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Color de Texto</label>
-                        <div className="flex gap-1.5 font-mono">
-                          <input 
-                            type="color"
-                            value={settings.template[activeFieldKey]?.color || '#000000'}
-                            onChange={(e) => updateFieldProperty(activeFieldKey, 'color', e.target.value)}
-                            className="bg-transparent border-0 outline-none w-8 h-7 cursor-pointer"
-                          />
-                          <input 
-                            type="text"
-                            value={settings.template[activeFieldKey]?.color || ''}
-                            onChange={(e) => updateFieldProperty(activeFieldKey, 'color', e.target.value)}
-                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded font-mono text-slate-900 dark:text-white text-[10px] uppercase px-1.5 py-1 focus:ring-1 focus:ring-pink-500 focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Text Weight and Alignment */}
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <div>
-                        <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Grosor Letra</label>
-                        <select
-                          value={settings.template[activeFieldKey]?.fontWeight || 'normal'}
-                          onChange={(e) => updateFieldProperty(activeFieldKey, 'fontWeight', e.target.value as any)}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded text-xs px-2.5 py-1 text-slate-800 dark:text-slate-300 focus:ring-1 focus:ring-pink-500 focus:outline-none"
-                        >
-                          <option value="normal">Normal</option>
-                          <option value="bold">Negrita (Bold)</option>
-                          <option value="bolder">Gruesa (Bolder)</option>
-                          <option value="black">Negra Extrema (Black)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Alineación</label>
-                        <select
-                          value={settings.template[activeFieldKey]?.align || 'center'}
-                          onChange={(e) => updateFieldProperty(activeFieldKey, 'align', e.target.value as any)}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded text-xs px-2.5 py-1 text-slate-800 dark:text-slate-300 focus:ring-1 focus:ring-pink-500 focus:outline-none"
-                        >
-                          <option value="center">Centrado (Middle)</option>
-                          <option value="left">Izquierda (Start)</option>
-                          <option value="right">Derecha (End)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-
-                {/* Designer Submit Button */}
-                <div className="pt-2">
-                  <button
-                    onClick={() => handleSaveSettings()}
-                    disabled={savingSettings}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-3 rounded-lg flex items-center justify-center gap-1.5 transition-all shadow cursor-pointer uppercase tracking-wider disabled:opacity-50"
-                  >
-                    {savingSettings ? (
-                      <>
-                        <RefreshCw className="w-4.5 h-4.5 animate-spin" />
-                        Guardando Plantilla...
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-4.5 h-4.5" />
-                        Guardar Diseño de Posicionamiento
-                      </>
-                    )}
-                  </button>
-                </div>
-
-              </div>
-
-              {/* Graphical Editor Box Workspace */}
-              <div className="xl:col-span-7 flex flex-col gap-3">
-                <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs shadow-sm">
-                  <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
-                    <span className="w-2.5 h-2.5 rounded-full bg-pink-500 shrink-0" />
-                    <span>Arrastra los nombres directamente sobre el papel o haz clic en cualquier lugar para ubicar <strong>{activeFieldKey === 'nameField' ? '[Nombre]' : activeFieldKey === 'idField' ? '[Cédula]' : '[Rol]'}</strong></span>
-                  </div>
-                </div>
-
-                {/* Aspect 16/9 Interactive Box */}
-                <div className="bg-slate-100 dark:bg-slate-950 border border-slate-250 dark:border-slate-800 rounded-xl overflow-hidden shadow-lg relative">
-                  <div 
-                    ref={canvasRef}
-                    onClick={handleCanvasClick}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    className="w-full aspect-[16/9] relative select-none cursor-crosshair overflow-hidden touch-none"
-                    style={{
-                      backgroundImage: settings.template?.bgImage ? `url(${settings.template.bgImage})` : 'none',
-                      backgroundSize: '100% 100%',
-                      backgroundPosition: 'center',
-                      backgroundRepeat: 'no-repeat',
-                      backgroundColor: darkMode ? '#0c071a' : '#fbf9ff'
-                    }}
-                  >
-                    {/* Placeholder Grid lines if no custom design image uploaded */}
-                    {!settings.template?.bgImage && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-25">
-                        <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle, #db2777 1px, transparent 1px)', backgroundSize: '16px 16px' }} />
-                        <Maximize2 className="w-12 h-12 text-slate-400 dark:text-slate-500 mb-2" />
-                        <p className="text-xs font-bold font-mono tracking-widest text-slate-600 dark:text-slate-400 text-center uppercase">PREVIEW DE COMPOSICIÓN</p>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-600 font-mono mt-1">Sube un fondo en la izquierda para maquinar tu mapeo</p>
-                      </div>
-                    )}
-
-                    {/* NAME ELEMENT DRAGGABLE REPRESENTATION */}
-                    {settings.template?.nameField?.enabled && (
-                      <div 
-                        onPointerDown={(e) => handlePointerDown('nameField', e)}
-                        className={`absolute select-none p-1.5 rounded transition-all cursor-move border flex items-center justify-center text-center ${
-                          activeFieldKey === 'nameField' 
-                            ? 'border-pink-500 bg-pink-500/20 text-slate-900 dark:text-white shadow-lg ring-1 ring-pink-500 scale-102 font-bold z-30' 
-                            : 'border-indigo-300 bg-indigo-50 dark:border-indigo-500/40 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 z-10 shadow-sm'
-                        }`}
-                        style={{
-                          left: `${settings.template.nameField.x}%`,
-                          top: `${settings.template.nameField.y}%`,
-                          transform: `translate(${
-                            settings.template.nameField.align === 'center' ? '-50%' : (settings.template.nameField.align === 'right' ? '-100%' : '0%')
-                          }, -50%)`,
-                        }}
-                      >
-                        <span 
-                          style={{
-                            fontSize: `${settings.template.nameField.fontSize * 0.4}px`, // scaled for view container
-                            fontWeight: settings.template.nameField.fontWeight || 'bold',
-                            color: settings.template.nameField.color || '#1e3a8a'
-                          }}
-                        >
-                          [NOMBRE COMPLETO]
-                        </span>
-                      </div>
-                    )}
-
-                    {/* CC INDENTIFICATION ELEMENT DRAGGABLE REPRESENTATION */}
-                    {settings.template?.idField?.enabled && (
-                      <div 
-                        onPointerDown={(e) => handlePointerDown('idField', e)}
-                        className={`absolute select-none p-1.5 rounded transition-all cursor-move border flex items-center justify-center text-center ${
-                          activeFieldKey === 'idField' 
-                            ? 'border-pink-500 bg-pink-500/20 text-slate-900 dark:text-white shadow-lg ring-1 ring-pink-500 scale-102 font-bold z-30' 
-                            : 'border-violet-300 bg-violet-50 dark:border-violet-500/40 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 z-10 shadow-sm'
-                        }`}
-                        style={{
-                          left: `${settings.template.idField.x}%`,
-                          top: `${settings.template.idField.y}%`,
-                          transform: `translate(${
-                            settings.template.idField.align === 'center' ? '-50%' : (settings.template.idField.align === 'right' ? '-100%' : '0%')
-                          }, -50%)`,
-                        }}
-                      >
-                        <span 
-                          style={{
-                            fontSize: `${settings.template.idField.fontSize * 0.4}px`,
-                            fontWeight: settings.template.idField.fontWeight || 'normal',
-                            color: settings.template.idField.color || '#374151'
-                          }}
-                        >
-                          C.C. 1.085.123.456
-                        </span>
-                      </div>
-                    )}
-
-                    {/* ROLE ELEMENT DRAGGABLE REPRESENTATION */}
-                    {settings.template?.roleField?.enabled && (
-                      <div 
-                        onPointerDown={(e) => handlePointerDown('roleField', e)}
-                        className={`absolute select-none p-1 rounded transition-all cursor-move border flex items-center justify-center text-center ${
-                          activeFieldKey === 'roleField' 
-                            ? 'border-pink-500 bg-pink-500/20 text-slate-900 dark:text-white shadow-lg ring-1 ring-pink-500 scale-102 font-bold z-30' 
-                            : 'border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 z-10 shadow-sm'
-                        }`}
-                        style={{
-                          left: `${settings.template.roleField.x}%`,
-                          top: `${settings.template.roleField.y}%`,
-                          transform: `translate(${
-                            settings.template.roleField.align === 'center' ? '-50%' : (settings.template.roleField.align === 'right' ? '-100%' : '0%')
-                          }, -50%)`,
-                        }}
-                      >
-                        <span 
-                          style={{
-                            fontSize: `${settings.template.roleField.fontSize * 0.4}px`,
-                            fontWeight: settings.template.roleField.fontWeight || 'bold',
-                            color: settings.template.roleField.color || '#ea580c'
-                          }}
-                        >
-                          ROL: EGRESADO / ESTUDIANTE
-                        </span>
-                      </div>
-                    )}
-
-                  </div>
-                </div>
-
-                <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1 mt-1 shadow-sm">
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-pink-500" />
-                    Consejo Técnico
-                  </h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal">
-                    Los valores X e Y se guardan en porcentajes (0-100%). Esto asegura que se escalen de manera fluida tanto en dispositivos móviles en el buscador interactivo público como en las planillas de descarga HD en resolución 1920x1080.
-                  </p>
-                </div>
-              </div>
-
+            <div className="bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800 p-4 flex justify-center">
+              <CertificateTemplate
+                name={previewingCert.name}
+                identification={previewingCert.identification}
+                role={previewingCert.role}
+                id={previewingCert.id}
+                templateConfig={settings.template}
+              />
             </div>
-          )}
+          </div>
+        )}
 
-          {/* TAB 3: BATCH CSV FILE AND PASTE REGISTRATION */}
-          {activeTab === 'bulk' && (
-            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-md space-y-6">
+        {/* ════ TAB: DESIGNER ════════════════════════════════════════════ */}
+        {activeTab === 'designer' && (
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+
+            {/* Controls panel */}
+            <div className="xl:col-span-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 space-y-5 shadow-sm h-fit">
               <div>
                 <h2 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
-                  <FileSpreadsheet className="w-5 h-5 text-indigo-500" />
-                  Carga Masiva de Inscritos (En lote)
+                  <Layers className="w-4 h-4 text-pink-500" /> Diseño del Certificado
                 </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Ingresa una lista de asistentes desde Excel o un archivo CSV. Los registros válidos se añadirán y se les despachará su certificado de inmediato.
-                </p>
+                <p className="text-xs text-slate-400 mt-1">Sube el fondo, selecciona un campo y arrástralo sobre el canvas.</p>
               </div>
 
-              {/* Dual upload section */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                
-                {/* Method A: Paste comma separated string */}
-                <div className="space-y-2">
-                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Método 1: Pegar Texto delimitado (Excel / CSV)</label>
-                  <textarea
-                    rows={8}
-                    value={csvText}
-                    onChange={(e) => handleCsvTextChange(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded font-mono text-xs text-slate-800 dark:text-slate-300 p-3 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 leading-relaxed"
-                    placeholder={`nombre,identificacion,rol,correo\nJuan Rosero,1085200300,egresado,juan.rosero@udenar.edu.co\nMaria Gomez,1085300400,estudiante,maria.gomez@gmail.com\nCarlos Lopez,1085400500,empresario,carlos.lopez@yahoo.com`}
-                  />
-                  <span className="text-[10px] text-slate-500 block leading-normal">
-                    Delimitador soportado de manera automática: comas (,) o puntos y comas (;). Roles soportados: estudiante, egresado o empresario.
-                  </span>
-                </div>
+              {/* BG Upload */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Imagen de Fondo</label>
+                {!settings.template?.bgImage ? (
+                  <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-pink-500 rounded-xl p-6 text-center transition-all bg-slate-50 dark:bg-slate-950/40">
+                    <input type="file" accept="image/*" id="bg-upload-field" className="hidden" onChange={handleLogoUpload} />
+                    <label htmlFor="bg-upload-field" className="cursor-pointer flex flex-col items-center gap-1.5">
+                      <Upload className="w-8 h-8 text-pink-500" />
+                      <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">Elegir PNG o JPG</span>
+                      <span className="text-[10px] text-slate-400">HD recomendado (1920×1080)</span>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl">
+                    <div className="flex items-center gap-2">
+                      <img src={settings.template.bgImage} className="w-12 h-12 object-cover rounded border border-slate-300 dark:border-slate-700" alt="fondo" />
+                      <div>
+                        <span className="text-xs font-bold text-slate-800 dark:text-white block">Fondo activo</span>
+                        <span className="text-[10px] text-emerald-500 font-mono">Base64</span>
+                      </div>
+                    </div>
+                    <button onClick={() => setSettings((p: any) => ({ ...p, template: { ...p.template, bgImage: null } }))}
+                      className="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+                      Remover
+                    </button>
+                  </div>
+                )}
+              </div>
 
-                {/* Method B: Or drag CSV file */}
-                <div className="space-y-2 flex flex-col justify-between">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Método 2: Cargar un archivo .CSV / .TXT</label>
-                    <div className="border border-dashed border-slate-300 dark:border-slate-700 hover:border-indigo-500 rounded-lg p-9 text-center transition-all bg-slate-50/60 dark:bg-slate-950/60 mt-2">
-                      <input 
-                        type="file" 
-                        accept=".csv,.txt" 
-                        id="csv-file-field" 
-                        className="hidden" 
-                        onChange={handleCsvFileUpload}
-                      />
-                      <label htmlFor="csv-file-field" className="cursor-pointer flex flex-col items-center justify-center gap-1.5">
-                        <FileSpreadsheet className="w-10 h-10 text-indigo-500" />
-                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-1">Elegir Archivo Planilla</span>
-                        <span className="text-[10px] text-slate-550 dark:text-slate-500 mt-0.5">TXT o CSV con encabezado delimitado</span>
-                      </label>
+              {/* Field selector */}
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Campo activo</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {([
+                    { key: 'nameField', label: 'Nombre' },
+                    { key: 'idField', label: 'Cédula' },
+                    { key: 'roleField', label: 'Rol' }
+                  ] as const).map(f => (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() => setActiveFieldKey(f.key)}
+                      className={`py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer text-center ${
+                        activeFieldKey === f.key
+                          ? 'bg-pink-50 dark:bg-pink-900/20 border-pink-500 text-pink-600 dark:text-pink-300'
+                          : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900'
+                      }`}
+                    >{f.label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Sliders & props */}
+              <div className="space-y-4 p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-pink-600 dark:text-pink-400">
+                    {activeFieldKey === 'nameField' ? 'Nombre' : activeFieldKey === 'idField' ? 'Cédula/ID' : 'Rol'}
+                  </span>
+                  <label className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold cursor-pointer">
+                    <input type="checkbox" checked={settings.template[activeFieldKey]?.enabled}
+                      onChange={e => updateFieldProperty(activeFieldKey, 'enabled', e.target.checked)} />
+                    Habilitado
+                  </label>
+                </div>
+                <div className="space-y-3 text-xs">
+                  {[
+                    { label: 'Posición X', prop: 'x', max: 100, step: 0.5 },
+                    { label: 'Posición Y', prop: 'y', max: 100, step: 0.5 }
+                  ].map(sl => (
+                    <div key={sl.prop} className="space-y-1">
+                      <div className="flex justify-between text-[10px] text-slate-500">
+                        <span>{sl.label} (%)</span>
+                        <span className="font-mono text-pink-500 font-bold">{settings.template[activeFieldKey]?.[sl.prop]}%</span>
+                      </div>
+                      <input type="range" min="0" max={sl.max} step={sl.step}
+                        value={settings.template[activeFieldKey]?.[sl.prop] || 50}
+                        onChange={e => updateFieldProperty(activeFieldKey, sl.prop, parseFloat(e.target.value))}
+                        className="w-full accent-pink-500 cursor-pointer" />
+                    </div>
+                  ))}
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Fuente (pt)</label>
+                      <input type="number" value={settings.template[activeFieldKey]?.fontSize || 20}
+                        onChange={e => updateFieldProperty(activeFieldKey, 'fontSize', parseInt(e.target.value) || 12)}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded font-mono text-xs px-2.5 py-1.5 focus:ring-1 focus:ring-pink-500 focus:outline-none text-slate-900 dark:text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Color</label>
+                      <div className="flex gap-1.5">
+                        <input type="color" value={settings.template[activeFieldKey]?.color || '#000000'}
+                          onChange={e => updateFieldProperty(activeFieldKey, 'color', e.target.value)}
+                          className="w-8 h-8 border-0 bg-transparent cursor-pointer rounded" />
+                        <input type="text" value={settings.template[activeFieldKey]?.color || ''}
+                          onChange={e => updateFieldProperty(activeFieldKey, 'color', e.target.value)}
+                          className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded font-mono text-[10px] uppercase px-1.5 py-1 focus:ring-1 focus:ring-pink-500 focus:outline-none text-slate-900 dark:text-white" />
+                      </div>
                     </div>
                   </div>
-
-                  {/* Help formats info */}
-                  <div className="bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-850 p-3 rounded-lg text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed font-sans">
-                    <strong className="text-slate-700 dark:text-slate-300 font-bold">Encabezados ideales: </strong>
-                    <code className="text-pink-600 dark:text-pink-400 font-mono">nombre | identificacion | rol | correo</code>. <br />
-                    Si no incluyes encabezados, el sistema asumirá ese orden exacto por columna de izquierda a derecha.
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Grosor</label>
+                      <select value={settings.template[activeFieldKey]?.fontWeight || 'normal'}
+                        onChange={e => updateFieldProperty(activeFieldKey, 'fontWeight', e.target.value)}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-xs px-2 py-1.5 text-slate-800 dark:text-slate-300 focus:ring-1 focus:ring-pink-500 focus:outline-none">
+                        <option value="normal">Normal</option>
+                        <option value="bold">Negrita</option>
+                        <option value="bolder">Gruesa</option>
+                        <option value="black">Negra</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Alineación</label>
+                      <select value={settings.template[activeFieldKey]?.align || 'center'}
+                        onChange={e => updateFieldProperty(activeFieldKey, 'align', e.target.value)}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-xs px-2 py-1.5 text-slate-800 dark:text-slate-300 focus:ring-1 focus:ring-pink-500 focus:outline-none">
+                        <option value="center">Centro</option>
+                        <option value="left">Izquierda</option>
+                        <option value="right">Derecha</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
-
               </div>
 
-              {/* PARSED ITEMS PREVIEW PANEL */}
-              {parsedItems.length > 0 && (
-                <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-extrabold text-indigo-600 dark:text-indigo-350 flex items-center gap-1">
-                      <span>Previsualización de Lote</span>
-                      <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded font-mono text-slate-650 dark:text-slate-400">{parsedItems.length} registros</span>
-                    </span>
-                    <span className="text-slate-500">Filtrando repetidos de manera automática en la base de datos</span>
-                  </div>
+              <button onClick={handleSaveSettings} disabled={savingSettings}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs py-3 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow cursor-pointer uppercase tracking-wider disabled:opacity-50">
+                {savingSettings ? <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</> : <><Check className="w-4 h-4" /> Guardar Diseño</>}
+              </button>
+            </div>
 
-                  <div className="max-h-[220px] overflow-y-auto border border-slate-200 dark:border-slate-800 rounded bg-slate-50 dark:bg-slate-950">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-105 dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-205 dark:border-slate-800 uppercase text-[9px] tracking-wider">
-                        <tr>
-                          <th className="p-2.5">Fila</th>
-                          <th className="p-2.5">Asistente (Nombre)</th>
-                          <th className="p-2.5">Cédula</th>
-                          <th className="p-2.5">Rol</th>
-                          <th className="p-2.5">Correo Destino</th>
-                          <th className="p-2.5">Estado Filtros</th>
-                        </tr>
+            {/* Canvas preview */}
+            <div className="xl:col-span-8 flex flex-col gap-3">
+              <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-2.5 flex items-center gap-2 text-xs shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-pink-500 shrink-0" />
+                <span className="text-slate-500 dark:text-slate-400">
+                  Haz clic en el canvas o arrastra los campos. Campo activo: <strong className="text-pink-500">{activeFieldKey === 'nameField' ? '[Nombre]' : activeFieldKey === 'idField' ? '[Cédula]' : '[Rol]'}</strong>
+                </span>
+              </div>
+
+              <div className="bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                <div
+                  ref={canvasRef}
+                  onClick={handleCanvasClick}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  className="w-full aspect-[16/9] relative select-none cursor-crosshair overflow-hidden touch-none"
+                  style={{
+                    backgroundImage: settings.template?.bgImage ? `url(${settings.template.bgImage})` : 'none',
+                    backgroundSize: '100% 100%',
+                    backgroundPosition: 'center',
+                    backgroundColor: darkMode ? '#0c071a' : '#f8f5ff'
+                  }}
+                >
+                  {!settings.template?.bgImage && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-25">
+                      <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle, #db2777 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
+                      <Maximize2 className="w-10 h-10 text-slate-400 mb-2" />
+                      <p className="text-xs font-bold font-mono tracking-widest text-slate-500 uppercase">Canvas del Certificado</p>
+                    </div>
+                  )}
+
+                  {(['nameField', 'idField', 'roleField'] as const).map(fk => {
+                    const field = settings.template?.[fk];
+                    if (!field?.enabled) return null;
+                    const colors = { nameField: ['border-pink-500', 'bg-pink-500/20', 'border-indigo-300', 'bg-indigo-50 dark:bg-indigo-900/40'], idField: ['border-pink-500', 'bg-pink-500/20', 'border-violet-300', 'bg-violet-50 dark:bg-violet-900/40'], roleField: ['border-pink-500', 'bg-pink-500/20', 'border-amber-300', 'bg-amber-50 dark:bg-amber-900/40'] };
+                    const [aB, aBg, nB, nBg] = colors[fk];
+                    const isActive = activeFieldKey === fk;
+                    const label = fk === 'nameField' ? 'NOMBRE COMPLETO' : fk === 'idField' ? 'C.C. 1.085.XXX.XXX' : 'ROL / CARGO';
+                    return (
+                      <div
+                        key={fk}
+                        onPointerDown={e => handlePointerDown(fk, e)}
+                        className={`absolute select-none p-1 rounded cursor-move border flex items-center justify-center ${isActive ? `${aB} ${aBg} shadow-lg ring-1 ring-pink-500 z-30` : `${nB} ${nBg} z-10 shadow-sm`} transition-all`}
+                        style={{
+                          left: `${field.x}%`, top: `${field.y}%`,
+                          transform: `translate(${field.align === 'center' ? '-50%' : field.align === 'right' ? '-100%' : '0%'}, -50%)`
+                        }}
+                      >
+                        <span style={{ fontSize: `${field.fontSize * 0.4}px`, fontWeight: field.fontWeight, color: field.color }}>{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ════ TAB: BULK CSV ════════════════════════════════════════════ */}
+        {activeTab === 'bulk' && (
+          <div className="max-w-3xl mx-auto flex flex-col gap-5">
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+              <h2 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5 mb-1">
+                <FileSpreadsheet className="w-4 h-4 text-pink-500" /> Carga Masiva CSV
+              </h2>
+              <p className="text-xs text-slate-400 mb-4">Columnas: Nombre, Identificacion, Rol (estudiante|egresado|empresario), Correo. Separador coma o punto y coma.</p>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <input type="file" accept=".csv,.txt" id="csv-file" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { const t = ev.target?.result as string; setCsvText(t); parseCsvString(t); }; r.readAsText(f); }} />
+                  <label htmlFor="csv-file" className="cursor-pointer text-xs font-bold px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded text-slate-700 dark:text-slate-300 transition-all flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" /> Cargar archivo CSV
+                  </label>
+                  <span className="text-xs text-slate-400">o pega el contenido abajo</span>
+                </div>
+                <textarea
+                  value={csvText}
+                  onChange={e => { setCsvText(e.target.value); parseCsvString(e.target.value); }}
+                  className="w-full h-32 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 font-mono text-xs text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-pink-500 focus:outline-none resize-none"
+                  placeholder={"Nombre,Identificacion,Rol,Correo\nJuan Pérez,1085123456,estudiante,juan@udenar.edu.co"}
+                />
+              </div>
+
+              {parsedItems.length > 0 && (
+                <div className="mt-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                  <div className="bg-slate-50 dark:bg-slate-950 px-4 py-2.5 flex justify-between items-center border-b border-slate-200 dark:border-slate-800 text-xs font-bold">
+                    <span className="text-slate-700 dark:text-slate-200">{parsedItems.length} filas detectadas · {parsedItems.filter(i => i.valid).length} válidas</span>
+                    <span className="text-red-500">{parsedItems.filter(i => !i.valid).length} con errores</span>
+                  </div>
+                  <div className="overflow-x-auto max-h-48 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-950 text-slate-400 text-[10px] uppercase">
+                        <tr><th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">Nombre</th><th className="px-3 py-2 text-left">ID</th><th className="px-3 py-2 text-left">Rol</th><th className="px-3 py-2 text-left">Correo</th><th className="px-3 py-2 text-left">Estado</th></tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-200 dark:divide-slate-850/60 font-mono">
-                        {parsedItems.map((item, idx) => (
-                          <tr key={idx} className={item.valid ? 'hover:bg-slate-100/40 dark:hover:bg-slate-900/40 text-slate-700 dark:text-slate-300' : 'bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-300'}>
-                            <td className="p-2">{item.rowNum}</td>
-                            <td className="p-2 font-sans font-bold">{item.name || '—'}</td>
-                            <td className="p-2">{item.identification || '—'}</td>
-                            <td className="p-2 capitalize text-[10px]">{item.role}</td>
-                            <td className="p-2">{item.email || '—'}</td>
-                            <td className="p-2">
-                              {item.valid ? (
-                                <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
-                                  <Check className="w-3 h-3" />
-                                  Listo
-                                </span>
-                              ) : (
-                                <span className="text-red-600 dark:text-red-400 flex items-center gap-0.5 font-sans" title={item.error}>
-                                  <AlertCircle className="w-3 h-3" />
-                                  {item.error.substring(0, 15)}...
-                                </span>
-                              )}
-                            </td>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {parsedItems.map((item, i) => (
+                          <tr key={i} className={item.valid ? '' : 'bg-red-50 dark:bg-red-950/20'}>
+                            <td className="px-3 py-2 text-slate-400 font-mono">{item.rowNum}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{item.name || '—'}</td>
+                            <td className="px-3 py-2 font-mono text-slate-500">{item.identification || '—'}</td>
+                            <td className="px-3 py-2 capitalize text-slate-500">{item.role}</td>
+                            <td className="px-3 py-2 text-slate-500">{item.email || '—'}</td>
+                            <td className="px-3 py-2">{item.valid ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <span className="text-red-500 text-[10px]">{item.error}</span>}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-
-                  {/* Execut Button trigger with feedback details */}
-                  <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-500/20 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-4">
-                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-normal max-w-lg">
-                      Al procesar el lote, cada participante de la lista se registrará en estado <strong className="text-indigo-950 dark:text-white font-bold">correcto (aprobado)</strong>, guardándose y disparando el micro-generador para enviar el certificado de forma inmediata.
-                    </p>
-
-                    <button
-                      onClick={handleExecuteBulkRegister}
-                      disabled={bulkStatus.status === 'processing'}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-2.5 px-6 rounded-lg flex items-center gap-2 transition-all cursor-pointer shadow disabled:opacity-50 uppercase tracking-widest"
-                    >
-                      {bulkStatus.status === 'processing' ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          Procesando...
-                        </>
-                      ) : (
-                        <>
-                          <FileSpreadsheet className="w-4 h-4" />
-                          Generar Lote Completo
-                        </>
-                      )}
-                    </button>
-                  </div>
                 </div>
               )}
 
               {bulkStatus.status !== 'idle' && (
-                <div className={`p-3.5 rounded-lg border text-sm ${
-                  bulkStatus.status === 'processing' ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300' :
-                  bulkStatus.status === 'success' ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 animate-fade-in' :
-                  'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-500/30 text-red-700 dark:text-red-300'
-                }`}>
-                  <div className="flex items-center gap-2">
-                    {bulkStatus.status === 'processing' && <RefreshCw className="w-4 h-4 animate-spin" />}
-                    {bulkStatus.status === 'success' && <Check className="w-4 h-4" />}
-                    {bulkStatus.status === 'error' && <X className="w-4 h-4" />}
-                    <span className="font-semibold">{bulkStatus.message}</span>
-                  </div>
+                <div className={`mt-3 p-3 rounded-xl text-xs font-semibold ${bulkStatus.status === 'success' ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40' : bulkStatus.status === 'error' ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/40' : 'bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/40'}`}>
+                  {bulkStatus.status === 'processing' && <RefreshCw className="w-3.5 h-3.5 inline-block mr-1 animate-spin" />}
+                  {bulkStatus.message}
                 </div>
               )}
+
+              <button
+                onClick={handleExecuteBulkRegister}
+                disabled={parsedItems.filter(i => i.valid).length === 0 || bulkStatus.status === 'processing'}
+                className="mt-4 w-full bg-pink-600 hover:bg-pink-700 text-white font-black text-xs py-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow disabled:opacity-40"
+              >
+                {bulkStatus.status === 'processing' ? <><RefreshCw className="w-4 h-4 animate-spin" /> Procesando...</> : <><FileCheck className="w-4 h-4" /> Subir {parsedItems.filter(i => i.valid).length} registros a Notion</>}
+              </button>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* TAB 4: PASSCODE SETTINGS */}
-          {activeTab === 'settings' && (
-            <form onSubmit={(e) => { e.preventDefault(); handleSavePasscodeOnly(settings.dailyCode); }} className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-md p-6 space-y-6">
-              <div>
-                <h2 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
-                  <Database className="w-5 h-5 text-indigo-500" />
-                  Código Diario de Registro Público
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Configura el código indispensable que deben ingresar los participantes para poder inscribirse en las planillas.</p>
+        {/* ════ TAB: SETTINGS ════════════════════════════════════════════ */}
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl mx-auto flex flex-col gap-5">
+
+            {/* Roles Config */}
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
+              <h2 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-pink-500" /> Roles de Participantes
+              </h2>
+              <p className="text-xs text-slate-400">Personaliza los roles disponibles para el proyecto activo. Estos aparecerán en el formulario público y en los filtros.</p>
+
+              <div className="flex flex-wrap gap-2">
+                {projectRoles.map((role, idx) => (
+                  <div key={role} className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-bold capitalize">
+                    <span>{role}</span>
+                    {projectRoles.length > 1 && (
+                      <button type="button"
+                        onClick={() => setProjectRoles(prev => prev.filter((_, i) => i !== idx))}
+                        className="text-slate-400 hover:text-red-500 ml-1 cursor-pointer transition-colors">
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
 
-              <div className="max-w-md space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Código de Acceso Diario</label>
-                  <input
-                    type="text"
-                    value={settings.dailyCode}
-                    onChange={e => setSettings({...settings, dailyCode: e.target.value.toUpperCase()})}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono text-slate-900 dark:text-white text-sm px-3.5 py-2 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 transition-colors uppercase"
-                    placeholder="Por ejemplo: DISENO26"
-                    required
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">Este código valida el ingreso en la puerta de enlace pública.</p>
-                </div>
-
-                <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-850 text-xs text-slate-600 dark:text-slate-400 leading-normal">
-                  <p className="font-semibold text-slate-850 dark:text-slate-300">💡 Integración en Tiempo Real con Notion</p>
-                  <p className="mt-1">
-                    Cada vez que un estudiante llena el formulario con el código diario correcto, se crea una fila automáticamente en la base de datos de Notion bajo la categoría del proyecto seleccionado.
-                  </p>
-                </div>
-              </div>
-
-              {/* Guardar Settings Submit Bar */}
-              <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center">
-                <span className="text-[10px] text-slate-500">
-                  Cambios se aplican instantáneamente en todo el ecosistema.
-                </span>
-                
-                <button
-                  type="submit"
-                  disabled={savingSettings}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-2.5 px-5 rounded-lg flex items-center gap-1.5 hover:shadow-md cursor-pointer transition-all disabled:opacity-50"
-                >
-                  {savingSettings ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      Guardando...
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      Guardar Código Diario
-                    </>
-                  )}
+              <form onSubmit={e => {
+                e.preventDefault();
+                const val = newRoleInput.trim().toLowerCase();
+                if (val && !projectRoles.includes(val)) {
+                  setProjectRoles(prev => [...prev, val]);
+                  setNewRoleInput('');
+                }
+              }} className="flex gap-2">
+                <input type="text" value={newRoleInput} onChange={e => setNewRoleInput(e.target.value)}
+                  maxLength={30} placeholder="Ej: docente, investigador..."
+                  className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-pink-500 lowercase" />
+                <button type="submit" disabled={!newRoleInput.trim()}
+                  className="bg-pink-600 hover:bg-pink-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl disabled:opacity-40 cursor-pointer shadow transition-all flex items-center gap-1">
+                  <Plus className="w-3.5 h-3.5" /> Agregar
                 </button>
-              </div>
-            </form>
-          )}
+              </form>
 
-        </div>
+              <button onClick={handleSaveSettings} disabled={savingSettings || !selectedProjectId}
+                className="w-full bg-pink-600 hover:bg-pink-700 text-white font-black text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow disabled:opacity-40">
+                {savingSettings ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Guardando...</> : <><Check className="w-3.5 h-3.5" /> Guardar Roles del Proyecto</>}
+              </button>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
+              <h2 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5">
+                <Key className="w-4 h-4 text-pink-500" /> Código Diario de Registro
+              </h2>
+              <p className="text-xs text-slate-400">El código que los asistentes deben ingresar para acceder al formulario de registro.</p>
+
+              <div className="bg-gradient-to-br from-indigo-950 to-pink-950 rounded-xl p-4 text-center border border-indigo-500/20">
+                <p className="text-[10px] text-indigo-300 font-bold uppercase tracking-widest mb-2">Código activo hoy</p>
+                <code className="font-mono text-2xl font-black text-white tracking-widest">{settings.dailyCode || '...'}</code>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5">Cambiar código</label>
+                <form onSubmit={e => { e.preventDefault(); const input = (e.currentTarget.elements.namedItem('newCode') as HTMLInputElement); if (input?.value?.trim()) handleSavePasscode(input.value.trim().toUpperCase()); }}
+                  className="flex gap-2">
+                  <input type="text" name="newCode" maxLength={20}
+                    className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 font-mono text-sm text-slate-900 dark:text-white uppercase tracking-widest focus:outline-none focus:ring-1 focus:ring-pink-500"
+                    placeholder="NUEVO-CODIGO" />
+                  <button type="submit" disabled={savingSettings}
+                    className="bg-pink-600 hover:bg-pink-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shadow disabled:opacity-50 flex items-center gap-1.5">
+                    {savingSettings ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Guardar
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
 
-      {/* CREATE WORKSHOP PROJECT MODAL */}
+      {/* ── Create Project Modal ────────────────────────────────────────── */}
       {showCreateProjectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-100/60 dark:bg-slate-950/60 backdrop-blur-sm select-none animate-fade-in">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden p-6 space-y-6">
-            <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5 font-sans">
-                <Sparkles className="w-5 h-5 text-pink-500" />
-                Crear Nuevo Taller en Notion
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Esto creará un nuevo bloque de tipo toggle y su base de datos asociada directamente en tu espacio de Notion.
-              </p>
-            </div>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="font-bold text-slate-900 dark:text-white text-base mb-1">Nuevo Taller / Proyecto</h3>
+            <p className="text-xs text-slate-400 mb-4">Se creará un toggle en Notion con su base de datos de participantes.</p>
 
-            <form onSubmit={handleCreateProject} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 font-sans">
-                  Nombre / Título del Taller
-                </label>
-                <input
-                  type="text"
-                  value={newProjectTitle}
-                  onChange={(e) => setNewProjectTitle(e.target.value)}
-                  placeholder="Ej: Taller de Identidad Visual"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-semibold"
-                  required
-                  autoFocus
-                />
-              </div>
+            {modalError && <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/40 rounded-lg p-2.5 text-xs text-red-700 dark:text-red-300 mb-3">{modalError}</div>}
 
-              {modalError && (
-                <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/30 rounded-xl p-3 text-xs text-rose-600 dark:text-rose-400 font-semibold leading-normal font-sans">
-                  {modalError}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreateProjectModal(false);
-                    setNewProjectTitle('');
-                    setModalError('');
-                  }}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-extrabold text-xs rounded-xl border border-slate-200 dark:border-slate-700 transition cursor-pointer uppercase tracking-wider font-sans"
-                  disabled={creatingProject}
-                >
+            <form onSubmit={handleCreateProject} className="space-y-3">
+              <input
+                type="text"
+                value={newProjectTitle}
+                onChange={e => setNewProjectTitle(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-pink-500"
+                placeholder="Ej: Taller Diseño Mayo 2026"
+                autoFocus
+                required
+              />
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => { setShowCreateProjectModal(false); setNewProjectTitle(''); setModalError(''); }}
+                  className="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer transition-all">
                   Cancelar
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-pink-600 hover:bg-pink-700 text-white font-extrabold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5 uppercase tracking-wider font-sans disabled:opacity-50"
-                  disabled={creatingProject}
-                >
-                  {creatingProject ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Creando...
-                    </>
-                  ) : (
-                    'Crear Taller'
-                  )}
+                <button type="submit" disabled={creatingProject || !newProjectTitle.trim()}
+                  className="flex-[2] bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold py-2.5 rounded-xl transition-all cursor-pointer shadow disabled:opacity-50 flex items-center justify-center gap-1.5">
+                  {creatingProject ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Creando...</> : <><Plus className="w-3.5 h-3.5" /> Crear Taller</>}
                 </button>
               </div>
             </form>
@@ -1700,225 +1144,104 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
         </div>
       )}
 
-      {/* MANUAL REGISTER PARTICIPANT MODAL */}
-      {showAddRegModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-100/60 dark:bg-slate-950/60 backdrop-blur-sm select-none animate-fade-in animate-duration-150">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden p-6 space-y-5">
-            <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5 font-sans">
-                <UserPlus className="w-5 h-5 text-pink-500" />
-                Registrar Participante Manualmente
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                La información se guardará al instante en el proyecto activo de Notion de forma segura.
-              </p>
-            </div>
-
-            <form onSubmit={handleManualAddRegistrant} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                  Nombre Completo
-                </label>
-                <input
-                  type="text"
-                  value={addName}
-                  onChange={(e) => setAddName(e.target.value)}
-                  placeholder="Ej: Sebastián Gómez"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-semibold"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                  Identificación (C.C.)
-                </label>
-                <input
-                  type="text"
-                  value={addId}
-                  onChange={(e) => setAddId(e.target.value)}
-                  placeholder="Ej: 1085432109"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-mono font-semibold"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                  Rol de Asistencia
-                </label>
-                <select
-                  value={addRole}
-                  onChange={(e) => setAddRole(e.target.value as any)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-semibold"
-                >
-                  <option value="estudiante">estudiante</option>
-                  <option value="egresado">egresado</option>
-                  <option value="empresario">empresario</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                  Correo Electrónico
-                </label>
-                <input
-                  type="email"
-                  value={addEmail}
-                  onChange={(e) => setAddEmail(e.target.value)}
-                  placeholder="ejemplo@usuario.com"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-mono font-semibold"
-                  required
-                />
-              </div>
-
-              {addRegError && (
-                <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-105 dark:border-rose-900/30 rounded-xl p-3 text-xs text-rose-600 dark:text-rose-400 font-semibold font-sans">
-                  {addRegError}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAddRegModal(false);
-                    setAddRegError('');
-                  }}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-extrabold text-xs rounded-xl border border-slate-200 dark:border-slate-700 transition cursor-pointer uppercase tracking-wider font-sans"
-                  disabled={addingReg}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-pink-600 hover:bg-pink-700 text-white font-extrabold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5 uppercase tracking-wider font-sans disabled:opacity-50"
-                  disabled={addingReg}
-                >
-                  {addingReg ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Registrando...
-                    </>
-                  ) : (
-                    'Guardar'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* EDIT PARTICIPANT PROPERTIES MODAL */}
+      {/* ── Edit Registrant Modal ───────────────────────────────────────── */}
       {editingReg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-100/60 dark:bg-slate-950/60 backdrop-blur-sm select-none animate-fade-in animate-duration-150">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden p-6 space-y-5">
-            <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-1.5 font-sans">
-                <Pencil className="w-4.5 h-4.5 text-pink-500" />
-                Editar Datos de Asistente
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Modifica los datos del participante y sincronízalos directamente en la tabla de Notion.
-              </p>
-            </div>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="font-bold text-slate-900 dark:text-white text-base mb-4">Editar Participante</h3>
 
-            <form onSubmit={handleSaveEditRegistrant} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                  Nombre Completo
-                </label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder="Nombre en el certificado"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-semibold"
-                  required
-                />
+            <form onSubmit={handleSaveEditRegistrant} className="space-y-3">
+              {[
+                { label: 'Nombre', state: editName, setter: setEditName, type: 'text', placeholder: 'Nombre completo' },
+                { label: 'Identificación', state: editId, setter: setEditId, type: 'text', placeholder: 'C.C.' },
+                { label: 'Correo', state: editEmail, setter: setEditEmail, type: 'email', placeholder: 'correo@udenar.edu.co' }
+              ].map(f => (
+                <div key={f.label}>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">{f.label}</label>
+                  <input type={f.type} value={f.state} onChange={e => f.setter(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-pink-500"
+                    placeholder={f.placeholder} required />
+                </div>
+              ))}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Rol</label>
+                  <select value={editRole} onChange={e => setEditRole(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-pink-500">
+                    {projectRoles.map(r => (
+                      <option key={r} value={r} className="capitalize">{r.charAt(0).toUpperCase() + r.slice(1)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Estado</label>
+                  <select value={editStatus} onChange={e => setEditStatus(e.target.value as any)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-pink-500">
+                    <option value="recibido">Recibido</option>
+                    <option value="incorrecto">Incorrecto</option>
+                    <option value="certificado">Certificado</option>
+                  </select>
+                </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                  Identificación (C.C.)
-                </label>
-                <input
-                  type="text"
-                  value={editId}
-                  onChange={(e) => setEditId(e.target.value)}
-                  placeholder="Documento nacional"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-mono font-semibold"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                  Rol de Asistencia
-                </label>
-                <select
-                  value={editRole}
-                  onChange={(e) => setEditRole(e.target.value as any)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-semibold"
-                >
-                  <option value="estudiante">estudiante</option>
-                  <option value="egresado">egresado</option>
-                  <option value="empresario">empresario</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                  Correo Electrónico
-                </label>
-                <input
-                  type="email"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  placeholder="ejemplo@correo.com"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-mono font-semibold"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                  Estado de Certificado
-                </label>
-                <select
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value as any)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all font-semibold"
-                >
-                  <option value="recibido">recibido</option>
-                  <option value="correcto">correcto (certificado aprobado)</option>
-                  <option value="incorrecto">incorrecto (marcado con error)</option>
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingReg(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-extrabold text-xs rounded-xl border border-slate-200 dark:border-slate-700 transition cursor-pointer uppercase tracking-wider font-sans"
-                  disabled={updatingReg}
-                >
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setEditingReg(null)}
+                  className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer transition-all hover:bg-slate-200 dark:hover:bg-slate-700">
                   Cancelar
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-pink-600 hover:bg-pink-700 text-white font-extrabold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5 uppercase tracking-wider font-sans disabled:opacity-50"
-                  disabled={updatingReg}
-                >
-                  {updatingReg ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Sincronizando...
-                    </>
-                  ) : (
-                    'Sincronizar'
-                  )}
+                <button type="submit" disabled={updatingReg}
+                  className="flex-[2] bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold py-2.5 rounded-xl cursor-pointer shadow disabled:opacity-50 flex items-center justify-center gap-1.5 transition-all">
+                  {updatingReg ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Guardando...</> : <><Check className="w-3.5 h-3.5" /> Guardar cambios</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add Registrant Modal ────────────────────────────────────────── */}
+      {showAddRegModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="font-bold text-slate-900 dark:text-white text-base mb-4">Agregar Participante</h3>
+
+            {addRegError && <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/40 rounded-lg p-2.5 text-xs text-red-700 dark:text-red-300 mb-3">{addRegError}</div>}
+
+            <form onSubmit={handleManualAddRegistrant} className="space-y-3">
+              {[
+                { label: 'Nombre', state: addName, setter: setAddName, type: 'text', placeholder: 'Nombre completo' },
+                { label: 'Identificación', state: addId, setter: setAddId, type: 'text', placeholder: 'C.C.' },
+                { label: 'Correo', state: addEmail, setter: setAddEmail, type: 'email', placeholder: 'correo@udenar.edu.co' }
+              ].map(f => (
+                <div key={f.label}>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">{f.label}</label>
+                  <input type={f.type} value={f.state} onChange={e => f.setter(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-pink-500"
+                    placeholder={f.placeholder} required />
+                </div>
+              ))}
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Rol</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {projectRoles.map(r => (
+                    <button key={r} type="button" onClick={() => setAddRole(r)}
+                      className={`flex-1 min-w-[60px] py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer capitalize ${addRole === r ? 'bg-pink-50 dark:bg-pink-900/20 border-pink-500 text-pink-600 dark:text-pink-300' : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900'}`}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setShowAddRegModal(false)}
+                  className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={addingReg}
+                  className="flex-[2] bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold py-2.5 rounded-xl cursor-pointer shadow disabled:opacity-50 flex items-center justify-center gap-1.5 transition-all">
+                  {addingReg ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Registrando...</> : <><UserPlus className="w-3.5 h-3.5" /> Registrar</>}
                 </button>
               </div>
             </form>

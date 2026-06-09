@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type RoleType = 'estudiante' | 'egresado' | 'empresario';
+export type RoleType = string;
 
-export type StatusType = 'recibido' | 'correcto' | 'incorrecto';
+/** Tres estados posibles: recibido → (admin revisa) → certificado | incorrecto */
+export type StatusType = 'recibido' | 'incorrecto' | 'certificado';
 
 export interface Registrant {
   id: string;
@@ -16,6 +17,7 @@ export interface Registrant {
   status: StatusType;
   registeredAt: string;
   approvedAt?: string;
+  generatedAt?: string; // Fecha en que se generó/descargó el certificado
 }
 
 export interface FieldPosition {
@@ -37,11 +39,6 @@ export interface TemplateConfig {
 
 export interface AdminSettings {
   dailyCode: string;
-  smtpHost: string;
-  smtpPort: number;
-  smtpUser: string;
-  smtpPass: string;
-  senderEmail: string;
   template: TemplateConfig;
 }
 
