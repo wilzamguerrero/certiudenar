@@ -168,7 +168,11 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
       const activeProject = projects.find(p => p.id === selectedProjectId);
       if (activeProject?.config) {
         const migrated = migrateTemplateConfig(activeProject.config);
-        setSettings((prev: any) => ({ ...prev, template: { bgImage: migrated.bgImage, bgAspectRatio: migrated.bgAspectRatio ?? (16 / 9) } }));
+        setSettings((prev: any) => ({
+          ...prev,
+          template: { bgImage: migrated.bgImage, bgAspectRatio: migrated.bgAspectRatio ?? (16 / 9) },
+          dailyCode: activeProject.config.dailyCode || ''
+        }));
         setProjectFields(migrated.fields.length > 0 ? migrated.fields : DEFAULT_FIELDS);
         setActiveFieldId(migrated.fields[0]?.id ?? 'nameField');
         if (Array.isArray(activeProject.config.roles) && activeProject.config.roles.length > 0) {
@@ -292,15 +296,20 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
   };
 
   const handleSavePasscode = async (newCode: string) => {
+    if (!selectedProjectId) { flash('Selecciona un proyecto primero.', true); return; }
     setSavingSettings(true);
     try {
-      const res = await fetch('/api/admin/settings', {
+      const res = await fetch(`/api/notion/projects/${selectedProjectId}/daily-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dailyCode: newCode })
+        body: JSON.stringify({ code: newCode })
       });
       const d = await res.json();
-      if (d.success) { flash('Código guardado.'); setSettings((prev: any) => ({ ...prev, dailyCode: newCode })); }
+      if (d.success) {
+        flash('Código guardado en Notion.');
+        setSettings((prev: any) => ({ ...prev, dailyCode: newCode.toUpperCase() }));
+        setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, config: { ...p.config, dailyCode: newCode.toUpperCase() } } : p));
+      } else flash(d.message || 'Error al guardar código.', true);
     } catch { flash('Error al guardar código.', true); }
     finally { setSavingSettings(false); }
   };

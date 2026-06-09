@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, FormEvent } from 'react';
+import initHeroImg from './image/init.jpg';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Key, 
@@ -135,10 +136,6 @@ export default function App() {
   // 1. Path: Verify Daily Code
   const handleVerifyCode = async (e: FormEvent) => {
     e.preventDefault();
-    if (!selectedProjectId) {
-      setErrorMsg('Por favor selecciona un proyecto taller de Notion.');
-      return;
-    }
     if (!dailyCode.trim()) {
       setErrorMsg('Por favor ingresa un código.');
       return;
@@ -157,6 +154,8 @@ export default function App() {
 
       if (data.success) {
         setVerifiedCode(dailyCode.toUpperCase());
+        setSelectedProjectId(data.projectId);
+        setSearchProjectId(data.projectId);
         setCurrentView('register');
       } else {
         setErrorMsg(data.message || 'Código de asistencia de hoy incorrecto.');
@@ -268,16 +267,28 @@ export default function App() {
   };
 
   // Admin passcode verification
-  const handleAdminVerify = (e: FormEvent) => {
+  const handleAdminVerify = async (e: FormEvent) => {
     e.preventDefault();
-    // Use the password 'depadise2026' as configured by the admin
-    if (adminPass.trim() === 'depadise2026') {
-      setCurrentView('admin');
-      setShowAdminPassPrompt(false);
-      setAdminPass('');
-      refreshMsg();
-    } else {
-      setErrorMsg('Contraseña de administrador incorrecta.');
+    setLoading(true);
+    try {
+      const response = await fetch('/api/admin/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: adminPass.trim() })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setCurrentView('admin');
+        setShowAdminPassPrompt(false);
+        setAdminPass('');
+        refreshMsg();
+      } else {
+        setErrorMsg(data.message || 'Contraseña de administrador incorrecta.');
+      }
+    } catch {
+      setErrorMsg('Error de conexión al verificar contraseña.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -337,6 +348,43 @@ export default function App() {
             >
               {darkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-indigo-500" />}
             </button>
+
+            {/* Admin access: gear icon or inline pass form */}
+            {showAdminPassPrompt ? (
+              <form onSubmit={handleAdminVerify} className="flex gap-1.5 animate-fade-in bg-surface-container p-1 rounded-xl border border-outline-variant">
+                <input
+                  type="password"
+                  value={adminPass}
+                  onChange={e => setAdminPass(e.target.value)}
+                  className="bg-surface border border-outline-variant text-[11px] px-3 py-1.5 text-on-background rounded-lg w-28 focus:outline-none focus:border-primary text-center font-mono placeholder:text-outline/70"
+                  placeholder="Contraseña"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-primary hover:bg-primary-container text-white font-bold px-3 py-1.5 text-[10px] rounded-lg cursor-pointer uppercase font-sans shadow-sm"
+                >
+                  {loading ? '...' : 'Entrar'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowAdminPassPrompt(false); setAdminPass(''); refreshMsg(); }}
+                  className="bg-surface hover:bg-surface-container text-on-surface-variant px-2 py-1.5 text-[10px] rounded-lg cursor-pointer font-sans border border-outline-variant"
+                >
+                  ✕
+                </button>
+              </form>
+            ) : (
+              <button
+                onClick={() => setShowAdminPassPrompt(true)}
+                title="Panel Administrativo"
+                id="btn-admin-access"
+                className="p-2 rounded-full bg-surface-container hover:bg-surface-container-high border border-outline-variant/60 text-on-surface-variant hover:text-primary transition-all flex items-center justify-center cursor-pointer shadow-sm"
+              >
+                <SettingsIcon className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </header>
       )}
@@ -351,20 +399,14 @@ export default function App() {
       ) : (
         <div className="flex-1 w-full flex flex-col items-center justify-center p-4 py-8 md:py-12" id="form-container">
           
-          {/* Hero Card with Character - Shared for public step views */}
+          {/* Hero Banner - Shared for public step views */}
           {(currentView === 'code' || currentView === 'register' || currentView === 'success') && (
-            <div className="relative w-full max-w-lg mb-8 rounded-2xl overflow-hidden bg-primary shadow-lg aspect-[1.79/1]">
-              <div className="absolute inset-0 hero-pattern"></div>
-              <img 
-                alt="Banner Principal" 
-                className="w-full h-full object-cover relative z-10" 
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuAHBkytAodl-DvKxfHoAJe4GN-xBa_piF1VIi_X2k8OXx5jwsL2cgiYVgwefEIuq6NZMz3TZEfcE3Koq4igtMTdbe79hExmeMZ9R4LPkIWQiIwS6JbaE3KfGr3Bo91RlXlGm8ysc38XElYmVr-u3MC_l50dXUOioZL--M1ht9W3Yg93_-_BPi23OY4ATH8uZGUKBsNc-gFrmgVke6Lli9rX-Bv6vc2q3jr9ubwVj5peghpKVJutsz6sIxvqm5NvnBIR5vMtOY9mEPo" 
-                referrerPolicy="no-referrer"
+            <div className="w-full max-w-lg mb-8 rounded-2xl overflow-hidden shadow-lg">
+              <img
+                alt="Banner Principal"
+                className="w-full h-auto block"
+                src={initHeroImg}
               />
-              <div className="absolute bottom-0 left-0 w-full p-4 sm:p-6 bg-gradient-to-t from-primary/95 to-transparent z-20">
-                <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">¡Obtén tu Certificado!</h1>
-                <p className="text-xs text-primary-fixed font-medium mt-0.5">Taller con Empresarios y Egresados UDENAR</p>
-              </div>
             </div>
           )}
 
@@ -394,35 +436,6 @@ export default function App() {
 
                 <form onSubmit={handleVerifyCode} className="space-y-4 relative">
                   
-                  {/* Proyecto Taller / Notion Select */}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-on-surface-variant flex items-center gap-1">
-                      <BookOpen className="w-3.5 h-3.5 text-primary" />
-                      Selecciona el Taller / Proyecto Activo
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={selectedProjectId}
-                        onChange={(e) => {
-                          setSelectedProjectId(e.target.value);
-                          setSearchProjectId(e.target.value);
-                        }}
-                        className="w-full bg-surface border border-outline-variant text-on-background rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary cursor-pointer font-semibold shadow-sm"
-                        required
-                      >
-                        {projects.length === 0 ? (
-                          <option value="">Cargando talleres desde Notion...</option>
-                        ) : (
-                          projects.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.title}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </div>
-                  </div>
-
                   {/* Destacado: Código de Entrada de Hoy */}
                   <div className="bg-secondary-fixed p-4 rounded-xl border-2 border-secondary-container">
                     <label className="text-xs font-bold text-on-secondary-fixed block mb-2 font-sans">
@@ -457,13 +470,6 @@ export default function App() {
                   </button>
                 </form>
 
-                {/* Developer Playground Helper Notification */}
-                <div className="p-3.5 bg-surface-container border border-outline-variant/60 rounded-xl text-center select-none">
-                  <span className="text-[10px] text-primary font-extrabold block mb-0.5">💡 CONTROL DE ACCESO INTERNO</span>
-                  <p className="text-[10px] text-on-surface-variant leading-normal">
-                    Usa el código administrativo programado para hoy: <strong className="text-primary font-mono bg-primary-container/10 px-1.5 py-0.5 rounded border border-primary-container/20">DEPADISE2026</strong> o <strong className="text-primary font-mono bg-primary-container/10 px-1.5 py-0.5 rounded border border-primary-container/20">DISENO26</strong>
-                  </p>
-                </div>
               </motion.div>
             )}
 
@@ -870,62 +876,6 @@ export default function App() {
 
           </AnimatePresence>
         </div>
-      )}
-
-      {/* FOOTER & ADMIN PASS PROMPT DETECTOR */}
-      {currentView !== 'admin' && (
-        <footer className="bg-surface/80 border-t border-outline-variant py-8 px-6 text-center select-none relative" id="public-footer">
-          <div className="max-w-4xl mx-auto flex flex-col items-center gap-6">
-
-            <div className="flex flex-col sm:flex-row justify-between items-center w-full gap-4">
-              <div className="text-left">
-                <p className="text-[10px] text-on-surface-variant font-medium leading-relaxed">
-                  © 2026 Universidad de Nariño — Departamento de Diseño. Todos los derechos reservados.
-                </p>
-                <p className="text-[9px] text-outline font-medium mt-0.5">
-                  Taller con Empresarios y Egresados • Entrega Automática y Simulación Notion DB
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {showAdminPassPrompt ? (
-                  <form onSubmit={handleAdminVerify} className="flex gap-1.5 animate-fade-in bg-surface-container p-1 rounded-xl border border-outline-variant">
-                    <input
-                      type="password"
-                      value={adminPass}
-                      onChange={e => setAdminPass(e.target.value)}
-                      className="bg-surface border border-outline-variant text-[11px] px-3 py-1.5 text-on-background rounded-lg w-28 focus:outline-none focus:border-primary text-center font-mono placeholder:text-outline/70"
-                      placeholder="Passcode"
-                      autoFocus
-                    />
-                    <button
-                      type="submit"
-                      className="bg-primary hover:bg-primary-container text-white font-bold px-3 py-1.5 text-[10px] rounded-lg cursor-pointer uppercase font-sans shadow-sm"
-                    >
-                      Entrar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setShowAdminPassPrompt(false); setAdminPass(''); }}
-                      className="bg-surface hover:bg-surface-container text-on-surface-variant px-2 py-1.5 text-[10px] rounded-lg cursor-pointer font-sans border border-outline-variant"
-                    >
-                      X
-                    </button>
-                  </form>
-                ) : (
-                  <button
-                    onClick={() => setShowAdminPassPrompt(true)}
-                    id="btn-admin-access"
-                    className="text-[10px] text-on-surface-variant hover:text-primary font-bold transition-all px-3.5 py-2 rounded-full bg-surface hover:bg-surface-container border border-outline-variant/80 flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  >
-                    <SettingsIcon className="w-3.5 h-3.5 text-on-surface-variant" />
-                    Ingreso Administrativo
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </footer>
       )}
 
     </div>

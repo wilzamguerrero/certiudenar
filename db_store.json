@@ -3,6 +3,7 @@
     "dailyCode": "DISENO26",
     "template": {
       "bgImage": "/assets/.aistudio/image_banner.jpg",
+      "fields": [],
       "nameField": {
         "x": 22.5,
         "y": 61.9,
@@ -61,7 +62,8 @@
         "fontWeight": "bold",
         "enabled": true,
         "align": "center"
-      }
+      },
+      "dailyCode": "AAAA"
     }
   }
 }

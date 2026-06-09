@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS: AdminSettings = {
   dailyCode: 'DISENO26',
   template: {
     bgImage: getBannerBase64() || '/assets/.aistudio/image_banner.jpg',
+    fields: [],
     nameField: { x: 22.5, y: 61.9, fontSize: 32, color: '#1e1b4b', fontWeight: 'bold', enabled: true, align: 'center' },
     idField: { x: 23.1, y: 68.4, fontSize: 18, color: '#1f2937', fontWeight: 'normal', enabled: true, align: 'center' },
     roleField: { x: 22.5, y: 73.3, fontSize: 15, color: '#4b5563', fontWeight: 'bold', enabled: true, align: 'center' }
@@ -288,6 +289,48 @@ async function saveNotionProjectConfigToNotion(toggleBlockId: string, config: an
   }
 }
 
+// ─── Notion: admin password from first quote on parent page ──────────────────
+async function getAdminPassword(): Promise<string> {
+  try {
+    const response = await notion.blocks.children.list({ block_id: PARENT_PAGE_ID });
+    const quoteBlock = (response.results || []).find((b: any) => b.type === 'quote');
+    if (quoteBlock) {
+      const pwd = (quoteBlock.quote?.rich_text || []).map((t: any) => t.plain_text).join('').trim();
+      if (pwd) return pwd;
+    }
+  } catch (e) {
+    console.warn('Could not read admin password from Notion:', e);
+  }
+  const { settings } = readDb();
+  return (settings as any).adminPassword || 'depadise2026';
+}
+
+// ─── Notion: project daily code from quote block inside toggle ────────────────
+async function getProjectDailyCode(toggleBlockId: string): Promise<string | null> {
+  try {
+    const children = await notion.blocks.children.list({ block_id: toggleBlockId });
+    const quoteBlock = (children.results || []).find((b: any) => b.type === 'quote');
+    if (quoteBlock) {
+      return (quoteBlock.quote?.rich_text || []).map((t: any) => t.plain_text).join('').trim() || null;
+    }
+  } catch {}
+  return null;
+}
+
+async function saveProjectDailyCode(toggleBlockId: string, code: string): Promise<void> {
+  const children = await notion.blocks.children.list({ block_id: toggleBlockId });
+  const existing = (children.results || []).find((b: any) => b.type === 'quote');
+  const richText = [{ type: 'text', text: { content: code.toUpperCase() } }];
+  if (existing) {
+    await (notion.blocks as any).update({ block_id: existing.id, quote: { rich_text: richText } });
+  } else {
+    await notion.blocks.children.append({
+      block_id: toggleBlockId,
+      children: [{ object: 'block', type: 'quote', quote: { rich_text: richText } } as any]
+    });
+  }
+}
+
 // ─── Express app ──────────────────────────────────────────────────────────────
 async function startServer() {
   const app = express();
@@ -297,14 +340,43 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use('/assets', express.static(path.join(process.cwd(), 'assets')));
 
-  // Verify daily code
-  app.post('/api/verify-code', (req, res) => {
+  // POST verify admin password (reads from Notion quote block on parent page)
+  app.post('/api/admin/verify', async (req, res) => {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ success: false, message: 'Contraseña requerida' });
+    try {
+      const validPassword = await getAdminPassword();
+      if (password.trim() === validPassword) {
+        return res.json({ success: true });
+      }
+      return res.json({ success: false, message: 'Contraseña de administrador incorrecta.' });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // POST verify daily code — searches all project toggles for a matching quote block
+  app.post('/api/verify-code', async (req, res) => {
     const { code } = req.body;
-    const { settings } = readDb();
     if (!code) return res.status(400).json({ success: false, message: 'Código es requerido' });
-    const isValid = code.trim().toUpperCase() === settings.dailyCode.trim().toUpperCase();
-    if (isValid) return res.json({ success: true, message: 'Código válido' });
-    return res.json({ success: false, message: 'Código de asistencia incorrecto o vencido' });
+    const upperCode = code.trim().toUpperCase();
+    try {
+      const projects = await getNotionProjects();
+      for (const proj of projects) {
+        const projCode = await getProjectDailyCode(proj.id);
+        if (projCode && projCode.toUpperCase() === upperCode) {
+          return res.json({ success: true, projectId: proj.id, projectTitle: proj.title, message: 'Código válido' });
+        }
+      }
+      // Fallback: check against global daily code in local DB
+      const { settings } = readDb();
+      if (upperCode === (settings.dailyCode || '').toUpperCase() && projects.length > 0) {
+        return res.json({ success: true, projectId: projects[0].id, projectTitle: projects[0].title, message: 'Código válido' });
+      }
+      return res.json({ success: false, message: 'Código incorrecto. Verifica el código del día e inténtalo de nuevo.' });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
   });
 
   // GET projects list with configs
@@ -326,18 +398,21 @@ async function startServer() {
               b.type === 'code' && b.code?.language === 'plaintext' &&
               (b.code?.caption || []).map((t: any) => t.plain_text).join('').includes('Fondo')
             );
+            const quoteBlock = blks.find((b: any) => b.type === 'quote');
+            const projectDailyCode = quoteBlock ? (quoteBlock.quote?.rich_text || []).map((t: any) => t.plain_text).join('').trim() : null;
             let parsedLayout: any = {};
             if (codeBlock) {
               const txt = (codeBlock.code?.rich_text || []).map((t: any) => t.plain_text).join('');
               if (txt) parsedLayout = JSON.parse(txt);
             }
             const parsedBg = bgBlock ? (bgBlock.code?.rich_text || []).map((t: any) => t.plain_text).join('') || null : null;
-            if (Object.keys(parsedLayout).length > 0 || parsedBg) {
+            if (Object.keys(parsedLayout).length > 0 || parsedBg || projectDailyCode) {
               config = {
                 bgImage: parsedBg,
                 bgAspectRatio: parsedLayout.bgAspectRatio ?? null,
                 fields: parsedLayout.fields ?? null,
                 roles: parsedLayout.roles ?? null,
+                dailyCode: projectDailyCode,
                 nameField: parsedLayout.nameField || DEFAULT_SETTINGS.template.nameField,
                 idField: parsedLayout.idField || DEFAULT_SETTINGS.template.idField,
                 roleField: parsedLayout.roleField || DEFAULT_SETTINGS.template.roleField
@@ -355,6 +430,7 @@ async function startServer() {
             bgAspectRatio: null,
             fields: null,
             roles: null,
+            dailyCode: null,
             nameField: DEFAULT_SETTINGS.template.nameField,
             idField: DEFAULT_SETTINGS.template.idField,
             roleField: DEFAULT_SETTINGS.template.roleField
@@ -424,6 +500,23 @@ async function startServer() {
       writeDb(settings, projectsConfig);
       await saveNotionProjectConfigToNotion(id, config);
       res.json({ success: true, message: 'Configuración guardada' });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // POST save daily code as quote block inside project toggle
+  app.post('/api/notion/projects/:id/daily-code', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { code } = req.body;
+      if (!code?.trim()) return res.status(400).json({ success: false, message: 'Código requerido' });
+      await saveProjectDailyCode(id, code.trim());
+      // Also update local cache
+      const { settings, projectsConfig } = readDb();
+      if (projectsConfig[id]) projectsConfig[id].dailyCode = code.trim().toUpperCase();
+      writeDb(settings, projectsConfig);
+      res.json({ success: true, message: 'Código guardado en Notion' });
     } catch (e: any) {
       res.status(500).json({ success: false, message: e.message });
     }
@@ -667,6 +760,7 @@ async function startServer() {
     if (template) {
       settings.template = {
         bgImage: template.bgImage !== undefined ? template.bgImage : settings.template?.bgImage,
+        fields: template.fields || settings.template?.fields || [],
         nameField: template.nameField ? { ...(settings.template?.nameField || DEFAULT_SETTINGS.template.nameField), ...template.nameField } : (settings.template?.nameField || DEFAULT_SETTINGS.template.nameField),
         idField: template.idField ? { ...(settings.template?.idField || DEFAULT_SETTINGS.template.idField), ...template.idField } : (settings.template?.idField || DEFAULT_SETTINGS.template.idField),
         roleField: template.roleField ? { ...(settings.template?.roleField || DEFAULT_SETTINGS.template.roleField), ...template.roleField } : (settings.template?.roleField || DEFAULT_SETTINGS.template.roleField)
