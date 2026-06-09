@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect } from 'react';
 import { Download, Check, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
-import { TemplateConfig, FieldConfig, DEFAULT_FIELDS, migrateTemplateConfig } from '../types.js';
+import { TemplateConfig, migrateTemplateConfig } from '../types.js';
+import CertificateSvg from './CertificateSvg.tsx';
 
 interface CertificateProps {
   name: string;
@@ -11,19 +12,6 @@ interface CertificateProps {
   pageId?: string;
   onDownloaded?: () => void;
   templateConfig?: TemplateConfig | null;
-}
-
-/** Approximate auto-fit font size to fit within bounding box */
-function autoFitSize(text: string, field: FieldConfig, svgW: number, svgH: number): number {
-  if (!field.autoFit) return field.fontSize;
-  const boxW = (field.width / 100) * svgW;
-  const boxH = (field.height / 100) * svgH;
-  const charRatio = field.fontWeight === 'normal' ? 0.55 : 0.62;
-  const approxW = text.length * field.fontSize * charRatio;
-  let size = field.fontSize;
-  if (approxW > boxW) size = Math.floor(field.fontSize * (boxW / approxW));
-  if (size > boxH * 0.85) size = Math.floor(boxH * 0.85);
-  return Math.max(7, size);
 }
 
 export default function CertificateTemplate({
@@ -48,20 +36,8 @@ export default function CertificateTemplate({
   const rawTemplate = templateConfig || localTemplate;
   const activeTemplate = rawTemplate ? migrateTemplateConfig(rawTemplate) : null;
 
-  const SVG_W = 1200;
-  const SVG_H = Math.round(SVG_W / (activeTemplate?.bgAspectRatio ?? (16 / 9)));
   const DL_W = 1920;
   const DL_H = Math.round(DL_W / (activeTemplate?.bgAspectRatio ?? (16 / 9)));
-
-  const getFieldValue = (field: FieldConfig): string => {
-    switch (field.dataKey) {
-      case 'name': return name.toUpperCase();
-      case 'identification': return identification;
-      case 'role': return role.toUpperCase();
-      case 'custom': return (field.staticValue || field.label || '').toUpperCase();
-      default: return field.label.toUpperCase();
-    }
-  };
 
   const handleDownload = async () => {
     if (!svgRef.current) return;
@@ -114,50 +90,16 @@ export default function CertificateTemplate({
     } catch { setDownloading(false); }
   };
 
-  const hasCustomBg = activeTemplate?.bgImage;
-  const fields: FieldConfig[] = activeTemplate?.fields ?? DEFAULT_FIELDS;
-
   return (
     <div className="flex flex-col items-center gap-4 w-full" id={`cert-tmpl-${id}`}>
       <div className="w-full shadow-2xl rounded-xl overflow-hidden bg-slate-900 border border-slate-700 select-none"
         style={{ aspectRatio: String(activeTemplate?.bgAspectRatio ?? (16 / 9)) }}>
-        <svg
+        <CertificateSvg
           ref={svgRef}
-          viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+          templateConfig={activeTemplate}
+          values={{ name, identification, role }}
           className="w-full h-full"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          {hasCustomBg ? (
-            <>
-              <image href={activeTemplate!.bgImage!} width={SVG_W} height={SVG_H} x="0" y="0" preserveAspectRatio="xMidYMid slice" />
-              {fields.map(field => {
-                if (!field.enabled) return null;
-                const textVal = getFieldValue(field);
-                const fSize = autoFitSize(textVal, field, SVG_W, SVG_H);
-                const cx = SVG_W * (field.x / 100);
-                const cy = SVG_H * (field.y / 100);
-                const anchor = field.align === 'center' ? 'middle' : field.align === 'right' ? 'end' : 'start';
-                return (
-                  <text key={field.id}
-                    x={cx} y={cy}
-                    textAnchor={anchor}
-                    fontFamily="'Inter', sans-serif"
-                    fontWeight={field.fontWeight}
-                    fontSize={fSize}
-                    fill={field.color}
-                  >{textVal}</text>
-                );
-              })}
-            </>
-          ) : (
-            <>
-              <image href="/assets/.aistudio/image_banner.jpg" width={SVG_W} height={SVG_H} x="0" y="0" preserveAspectRatio="xMidYMid slice" />
-              <text x={270} y={418} textAnchor="middle" fontFamily="'Inter', sans-serif" fontWeight="bold" fontSize={32} fill="#1e1b4b">{name.toUpperCase()}</text>
-              <text x={278} y={462} textAnchor="middle" fontFamily="'JetBrains Mono', monospace" fontWeight="normal" fontSize={18} fill="#1f2937">{identification}</text>
-              <text x={270} y={495} textAnchor="middle" fontFamily="'Inter', sans-serif" fontWeight="bold" fontSize={15} fill="#4b5563">{role.toUpperCase()}</text>
-            </>
-          )}
-        </svg>
+        />
       </div>
 
       <div className="flex gap-4 w-full justify-center">

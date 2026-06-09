@@ -81,6 +81,93 @@ function writeDb(settings: AdminSettings, projectsConfig: Record<string, any> = 
   }
 }
 
+const BG_BLOCK_CAPTION_PREFIX = '__CERT_BG__';
+const BG_TEXT_CHUNK_SIZE = 1800;
+const BG_TEXT_CHUNKS_PER_BLOCK = 80;
+
+function richTextToPlainText(richText: any[] = []) {
+  return richText.map((item: any) => item?.plain_text || item?.text?.content || '').join('');
+}
+
+function splitString(value: string, size: number) {
+  const chunks: string[] = [];
+  for (let index = 0; index < value.length; index += size) {
+    chunks.push(value.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function buildBgRichTextGroups(bgImage: string) {
+  const textChunks = splitString(bgImage, BG_TEXT_CHUNK_SIZE).map(content => ({ type: 'text', text: { content } }));
+  const groups: any[][] = [];
+  for (let index = 0; index < textChunks.length; index += BG_TEXT_CHUNKS_PER_BLOCK) {
+    groups.push(textChunks.slice(index, index + BG_TEXT_CHUNKS_PER_BLOCK));
+  }
+  return groups;
+}
+
+function getBgBlockCaption(block: any) {
+  return richTextToPlainText(block?.code?.caption || []);
+}
+
+function getBgBlockIndex(block: any) {
+  const match = getBgBlockCaption(block).match(/^__CERT_BG__:(\d+)\/(\d+)$/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+function isBgBlock(block: any) {
+  if (block?.type !== 'code' || block?.code?.language !== 'plaintext') return false;
+  const caption = getBgBlockCaption(block);
+  return caption.startsWith(BG_BLOCK_CAPTION_PREFIX) || caption.includes('Imagen de Fondo de Certificado') || caption.includes('Fondo');
+}
+
+function readBgImageFromBlocks(results: any[]) {
+  const bgBlocks = (results || []).filter(isBgBlock);
+  if (bgBlocks.length === 0) return null;
+
+  const taggedBlocks = bgBlocks
+    .filter(block => getBgBlockCaption(block).startsWith(BG_BLOCK_CAPTION_PREFIX))
+    .sort((left, right) => getBgBlockIndex(left) - getBgBlockIndex(right));
+
+  if (taggedBlocks.length > 0) {
+    return taggedBlocks.map(block => richTextToPlainText(block.code?.rich_text || [])).join('') || null;
+  }
+
+  return richTextToPlainText(bgBlocks[0].code?.rich_text || []) || null;
+}
+
+async function saveBgImageBlocksToNotion(toggleBlockId: string, results: any[], bgImage: string | null) {
+  const existingBgBlocks = (results || []).filter(isBgBlock).sort((left, right) => getBgBlockIndex(left) - getBgBlockIndex(right));
+
+  if (!bgImage) {
+    await Promise.all(existingBgBlocks.map(block => (notion.blocks.delete as any)({ block_id: block.id }).catch(() => null)));
+    return;
+  }
+
+  const groups = buildBgRichTextGroups(bgImage);
+
+  for (let index = 0; index < groups.length; index++) {
+    const code = {
+      caption: [{ type: 'text', text: { content: `${BG_BLOCK_CAPTION_PREFIX}:${index + 1}/${groups.length}` } }],
+      rich_text: groups[index],
+      language: 'plaintext',
+    };
+
+    if (existingBgBlocks[index]) {
+      await notion.blocks.update({ block_id: existingBgBlocks[index].id, code });
+    } else {
+      await notion.blocks.children.append({
+        block_id: toggleBlockId,
+        children: [{ object: 'block', type: 'code', code } as any],
+      });
+    }
+  }
+
+  for (let index = groups.length; index < existingBgBlocks.length; index++) {
+    await (notion.blocks.delete as any)({ block_id: existingBgBlocks[index].id }).catch(() => null);
+  }
+}
+
 // ─── Notion: list toggle blocks as projects ───────────────────────────────────
 async function getNotionProjects(): Promise<Array<{ id: string; title: string }>> {
   try {
@@ -175,7 +262,59 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
     });
     if (matchingDb) { await ensureDbProperties(matchingDb.id); return matchingDb.id; }
 
-    // 5. Try to create an inline database INSIDE the toggle block
+    // 5. Prefer a child page inside the toggle, then place the database inside that page.
+    let childPageId = childPage?.id || null;
+    if (!childPageId) {
+      try {
+        const pageResp = await notion.blocks.children.append({
+          block_id: toggleBlockId,
+          children: [{
+            object: 'block',
+            type: 'child_page',
+            child_page: { title: `Participantes - ${projectTitle}` }
+          } as any]
+        });
+        childPageId = pageResp.results?.[0]?.id || null;
+      } catch {}
+    }
+
+    if (childPageId) {
+      const db = await notion.databases.create({
+        parent: { type: 'page_id', page_id: childPageId },
+        is_inline: true,
+        title: [{ type: 'text', text: { content: `Participantes - ${projectTitle}` } }],
+        properties: {
+          "Nombre": { title: {} },
+          "Identificacion": { rich_text: {} },
+          "Rol": {
+            select: {
+              options: [
+                { name: "estudiante", color: "blue" },
+                { name: "egresado", color: "purple" },
+                { name: "empresario", color: "orange" }
+              ]
+            }
+          },
+          "Correo": { email: {} },
+          "Estado": {
+            select: {
+              options: [
+                { name: "recibido", color: "yellow" },
+                { name: "incorrecto", color: "red" },
+                { name: "certificado", color: "green" }
+              ]
+            }
+          },
+          "Generado": { date: {} },
+          "Enlace Descarga": { files: {} }
+        }
+      });
+
+      await ensureDbProperties(db.id);
+      return db.id;
+    }
+
+    // 6. Try to create an inline database INSIDE the toggle block
     let dbId: string | null = null;
     try {
       const dbAppendResp = await (notion.blocks.children.append as any)({
@@ -195,7 +334,7 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
       console.warn('Inline child_database in toggle not supported, falling back to page level:', inlineErr);
     }
 
-    // 6. Final fallback: create database at parent page level + store __DB_ID__ reference
+    // 7. Final fallback: create database at parent page level + store __DB_ID__ reference
     const db = await notion.databases.create({
       parent: { type: 'page_id', page_id: PARENT_PAGE_ID },
       is_inline: true,
@@ -227,7 +366,8 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
       }
     });
 
-    dbId = db.id;
+    const fallbackDbId: string = db.id;
+    dbId = fallbackDbId;
 
     // Store DB reference inside toggle for future lookups
     try {
@@ -241,7 +381,7 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
                 type: 'text',
                 text: {
                   content: `📋 Tabla de participantes: Participantes - ${projectTitle}`,
-                  link: { url: `https://www.notion.so/${dbId.replace(/-/g, '')}` }
+                  link: { url: `https://www.notion.so/${fallbackDbId.replace(/-/g, '')}` }
                 }
               }]
             }
@@ -250,7 +390,7 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
             object: 'block', type: 'code',
             code: {
               caption: [{ type: 'text', text: { content: '__DB_ID__' } }],
-              rich_text: [{ type: 'text', text: { content: dbId } }],
+              rich_text: [{ type: 'text', text: { content: fallbackDbId } }],
               language: 'javascript'
             }
           }
@@ -260,7 +400,7 @@ async function getOrCreateDatabaseForProject(toggleBlockId: string, projectTitle
       console.warn('Could not append DB reference to toggle:', appendErr);
     }
 
-    return dbId;
+    return fallbackDbId;
   } catch (err: any) {
     console.error('Error in getOrCreateDatabaseForProject:', err);
     throw err;
@@ -301,27 +441,7 @@ async function saveNotionProjectConfigToNotion(toggleBlockId: string, config: an
       });
     }
 
-    if (config.bgImage) {
-      const existingBgBlock = results.find((b: any) =>
-        b.type === 'code' && b.code?.language === 'plaintext' &&
-        (b.code?.caption || []).map((t: any) => t.plain_text).join('').includes('Fondo')
-      );
-      const bgChunks: any[] = [];
-      for (let i = 0; i < config.bgImage.length; i += 2000) {
-        bgChunks.push({ type: 'text', text: { content: config.bgImage.substring(i, i + 2000) } });
-      }
-      if (existingBgBlock) {
-        await notion.blocks.update({ block_id: existingBgBlock.id, code: { rich_text: bgChunks, language: 'plaintext' } });
-      } else {
-        await notion.blocks.children.append({
-          block_id: toggleBlockId,
-          children: [{
-            object: 'block', type: 'code',
-            code: { caption: [{ type: 'text', text: { content: 'Imagen de Fondo de Certificado (Base64/URL)' } }], rich_text: bgChunks, language: 'plaintext' }
-          }]
-        });
-      }
-    }
+    await saveBgImageBlocksToNotion(toggleBlockId, results, config.bgImage || null);
   } catch (err) {
     console.error('Error synchronizing layout config to Notion:', err);
   }
@@ -432,10 +552,6 @@ async function startServer() {
             const listResponse = await notion.blocks.children.list({ block_id: proj.id });
             const blks: any[] = listResponse.results || [];
             const codeBlock = blks.find((b: any) => b.type === 'code' && b.code?.language === 'json');
-            const bgBlock = blks.find((b: any) =>
-              b.type === 'code' && b.code?.language === 'plaintext' &&
-              (b.code?.caption || []).map((t: any) => t.plain_text).join('').includes('Fondo')
-            );
             const quoteBlock = blks.find((b: any) => b.type === 'quote');
             const projectDailyCode = quoteBlock ? (quoteBlock.quote?.rich_text || []).map((t: any) => t.plain_text).join('').trim() : null;
             let parsedLayout: any = {};
@@ -443,7 +559,7 @@ async function startServer() {
               const txt = (codeBlock.code?.rich_text || []).map((t: any) => t.plain_text).join('');
               if (txt) parsedLayout = JSON.parse(txt);
             }
-            const parsedBg = bgBlock ? (bgBlock.code?.rich_text || []).map((t: any) => t.plain_text).join('') || null : null;
+            const parsedBg = readBgImageFromBlocks(blks);
             if (Object.keys(parsedLayout).length > 0 || parsedBg || projectDailyCode) {
               config = {
                 bgImage: parsedBg,

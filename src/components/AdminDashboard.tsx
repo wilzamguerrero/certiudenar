@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { Registrant, FieldConfig, DEFAULT_FIELDS, migrateTemplateConfig } from '../types.js';
 import CertificateTemplate from './CertificateTemplate.tsx';
+import CertificateSvg, { SVG_BASE_WIDTH, getFieldBox } from './CertificateSvg.tsx';
 
 interface AdminDashboardProps {
   onBackToRegistry: () => void;
@@ -166,20 +167,18 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
       fetchProjectRegistrants(selectedProjectId);
       setSelectedIds(new Set());
       const activeProject = projects.find(p => p.id === selectedProjectId);
-      if (activeProject?.config) {
-        const migrated = migrateTemplateConfig(activeProject.config);
-        setSettings((prev: any) => ({
-          ...prev,
-          template: { bgImage: migrated.bgImage, bgAspectRatio: migrated.bgAspectRatio ?? (16 / 9) },
-          dailyCode: activeProject.config.dailyCode || ''
-        }));
-        setProjectFields(migrated.fields.length > 0 ? migrated.fields : DEFAULT_FIELDS);
-        setActiveFieldId(migrated.fields[0]?.id ?? 'nameField');
-        if (Array.isArray(activeProject.config.roles) && activeProject.config.roles.length > 0) {
-          setProjectRoles(activeProject.config.roles);
-        } else {
-          setProjectRoles(['estudiante', 'egresado', 'empresario']);
-        }
+      const migrated = migrateTemplateConfig(activeProject?.config || { bgImage: null, bgAspectRatio: 16 / 9, fields: DEFAULT_FIELDS });
+      setSettings((prev: any) => ({
+        ...prev,
+        template: { bgImage: migrated.bgImage, bgAspectRatio: migrated.bgAspectRatio ?? (16 / 9) },
+        dailyCode: activeProject?.config?.dailyCode || ''
+      }));
+      setProjectFields(migrated.fields.length > 0 ? migrated.fields : DEFAULT_FIELDS);
+      setActiveFieldId(migrated.fields[0]?.id ?? 'nameField');
+      if (Array.isArray(activeProject?.config?.roles) && activeProject.config.roles.length > 0) {
+        setProjectRoles(activeProject.config.roles);
+      } else {
+        setProjectRoles(['estudiante', 'egresado', 'empresario']);
       }
     }
   }, [selectedProjectId, projects]);
@@ -424,16 +423,31 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
     if (file.size > 15 * 1024 * 1024) { alert('Archivo demasiado grande. Máximo 15MB.'); return; }
     const reader = new FileReader();
     reader.onload = (ev: any) => {
-      const dataUrl = ev.target.result as string;
-      // Detect aspect ratio from image
+      const sourceDataUrl = ev.target.result as string;
       const img = new Image();
       img.onload = () => {
-        const ar = img.width / img.height;
-        setSettings((prev: any) => ({ ...prev, template: { ...prev.template, bgImage: dataUrl, bgAspectRatio: ar } }));
+        const maxWidth = 1920;
+        const scale = Math.min(1, maxWidth / img.width);
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const optimizedDataUrl = mimeType === 'image/png'
+          ? canvas.toDataURL(mimeType)
+          : canvas.toDataURL(mimeType, 0.9);
+        const ar = width / height;
+        setSettings((prev: any) => ({ ...prev, template: { ...prev.template, bgImage: optimizedDataUrl, bgAspectRatio: ar } }));
       };
-      img.src = dataUrl;
+      img.src = sourceDataUrl;
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleBulkUpdate = async (status: 'certificado' | 'incorrecto' | 'recibido') => {
@@ -845,16 +859,7 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
         {activeTab === 'designer' && (() => {
           const activeField = projectFields.find(f => f.id === activeFieldId) ?? projectFields[0];
           const ar = settings.template?.bgAspectRatio ?? (16 / 9);
-          const svgW = 1200;
-          const svgH = Math.round(svgW / ar);
-          const scale = canvasPxWidth / svgW;
-
-          const previewText = (f: FieldConfig) => {
-            if (f.dataKey === 'name') return 'NOMBRE COMPLETO';
-            if (f.dataKey === 'identification') return 'C.C. 1.085.XXX.XXX';
-            if (f.dataKey === 'role') return 'ROL / CARGO';
-            return (f.staticValue || f.label || 'TEXTO FIJO').toUpperCase();
-          };
+          const svgH = Math.round(SVG_BASE_WIDTH / ar);
 
           const dataKeyColors: Record<string, string> = {
             name: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400',
@@ -1039,23 +1044,27 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                     className="w-full relative select-none overflow-hidden touch-none"
                     style={{
                       aspectRatio: String(ar),
-                      backgroundImage: settings.template?.bgImage ? `url(${settings.template.bgImage})` : 'none',
-                      backgroundSize: '100% 100%',
                       backgroundColor: darkMode ? '#0c071a' : '#f8f5ff'
                     }}
                   >
-                    {!settings.template?.bgImage && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-20">
-                        <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle, #db2777 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
-                        <Maximize2 className="w-10 h-10 text-slate-400 mb-2" />
-                        <p className="text-xs font-bold font-mono tracking-widest text-slate-500 uppercase">Canvas del Certificado</p>
-                      </div>
-                    )}
+                    <CertificateSvg
+                      templateConfig={{
+                        ...settings.template,
+                        bgAspectRatio: ar,
+                        fields: projectFields,
+                      }}
+                      values={{
+                        name: 'NOMBRE COMPLETO',
+                        identification: '1.085.XXX.XXX',
+                        role: 'ROL / CARGO',
+                      }}
+                      className="absolute inset-0 w-full h-full pointer-events-none"
+                    />
 
                     {projectFields.map(field => {
                       if (!field.enabled) return null;
                       const isActive = activeFieldId === field.id;
-                      const previewFontPx = field.fontSize * scale;
+                      const box = getFieldBox(field, SVG_BASE_WIDTH, svgH);
                       return (
                         <div
                           key={field.id}
@@ -1072,28 +1081,13 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                               : 'border border-white/50 z-10 shadow-sm'
                           }`}
                           style={{
-                            left: `${field.x}%`, top: `${field.y}%`,
-                            width: `${field.width}%`, height: `${field.height}%`,
-                            transform: 'translate(-50%, -50%)',
-                            backgroundColor: isActive ? 'rgba(236,72,153,0.12)' : 'rgba(255,255,255,0.06)',
+                            left: `${(box.left / SVG_BASE_WIDTH) * 100}%`,
+                            top: `${(box.top / svgH) * 100}%`,
+                            width: `${(box.width / SVG_BASE_WIDTH) * 100}%`,
+                            height: `${(box.height / svgH) * 100}%`,
+                            backgroundColor: isActive ? 'rgba(236,72,153,0.12)' : 'rgba(255,255,255,0.04)',
                           }}
                         >
-                          {/* Preview text */}
-                          <div className="absolute inset-0 flex items-center overflow-hidden px-0.5"
-                            style={{ justifyContent: field.align === 'center' ? 'center' : field.align === 'right' ? 'flex-end' : 'flex-start' }}>
-                            <span style={{
-                              fontSize: `${Math.min(previewFontPx, parseFloat(getComputedStyle(document.documentElement).fontSize || '16') * 100)}px`,
-                              fontWeight: field.fontWeight,
-                              color: field.color,
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              maxWidth: '100%',
-                              lineHeight: 1.1,
-                            }}>
-                              {previewText(field)}
-                            </span>
-                          </div>
-
                           {/* Resize handles – only when active */}
                           {isActive && (
                             <>

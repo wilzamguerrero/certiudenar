@@ -73,6 +73,96 @@ function json(data: unknown, status = 200) {
   });
 }
 
+const BG_BLOCK_CAPTION_PREFIX = '__CERT_BG__';
+const BG_TEXT_CHUNK_SIZE = 1800;
+const BG_TEXT_CHUNKS_PER_BLOCK = 80;
+
+function richTextToPlainText(richText: any[] = []) {
+  return richText.map((item: any) => item?.plain_text || item?.text?.content || '').join('');
+}
+
+function splitString(value: string, size: number) {
+  const chunks: string[] = [];
+  for (let index = 0; index < value.length; index += size) {
+    chunks.push(value.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function buildBgRichTextGroups(bgImage: string) {
+  const textChunks = splitString(bgImage, BG_TEXT_CHUNK_SIZE).map(content => ({
+    type: 'text',
+    text: { content },
+  }));
+  const groups: any[][] = [];
+  for (let index = 0; index < textChunks.length; index += BG_TEXT_CHUNKS_PER_BLOCK) {
+    groups.push(textChunks.slice(index, index + BG_TEXT_CHUNKS_PER_BLOCK));
+  }
+  return groups;
+}
+
+function getBgBlockCaption(block: any) {
+  return richTextToPlainText(block?.code?.caption || []);
+}
+
+function getBgBlockIndex(block: any) {
+  const match = getBgBlockCaption(block).match(/^__CERT_BG__:(\d+)\/(\d+)$/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+function isBgBlock(block: any) {
+  if (block?.type !== 'code' || block?.code?.language !== 'plaintext') return false;
+  const caption = getBgBlockCaption(block);
+  return caption.startsWith(BG_BLOCK_CAPTION_PREFIX) || caption.includes('Imagen de Fondo de Certificado') || caption.includes('Fondo');
+}
+
+function readBgImageFromBlocks(results: any[]) {
+  const bgBlocks = (results || []).filter(isBgBlock);
+  if (bgBlocks.length === 0) return null;
+
+  const taggedBlocks = bgBlocks
+    .filter(block => getBgBlockCaption(block).startsWith(BG_BLOCK_CAPTION_PREFIX))
+    .sort((left, right) => getBgBlockIndex(left) - getBgBlockIndex(right));
+
+  if (taggedBlocks.length > 0) {
+    return taggedBlocks.map(block => richTextToPlainText(block.code?.rich_text || [])).join('') || null;
+  }
+
+  return richTextToPlainText(bgBlocks[0].code?.rich_text || []) || null;
+}
+
+async function saveBgImageBlocksToNotion(notion: Notion, toggleBlockId: string, results: any[], bgImage: string | null) {
+  const existingBgBlocks = (results || []).filter(isBgBlock).sort((left, right) => getBgBlockIndex(left) - getBgBlockIndex(right));
+
+  if (!bgImage) {
+    await Promise.all(existingBgBlocks.map(block => notion.blocks.delete({ block_id: block.id }).catch(() => null)));
+    return;
+  }
+
+  const groups = buildBgRichTextGroups(bgImage);
+
+  for (let index = 0; index < groups.length; index++) {
+    const code = {
+      caption: [{ type: 'text', text: { content: `${BG_BLOCK_CAPTION_PREFIX}:${index + 1}/${groups.length}` } }],
+      rich_text: groups[index],
+      language: 'plaintext',
+    };
+
+    if (existingBgBlocks[index]) {
+      await notion.blocks.update({ block_id: existingBgBlocks[index].id, code });
+    } else {
+      await notion.blocks.children.append({
+        block_id: toggleBlockId,
+        children: [{ object: 'block', type: 'code', code } as any],
+      });
+    }
+  }
+
+  for (let index = groups.length; index < existingBgBlocks.length; index++) {
+    await notion.blocks.delete({ block_id: existingBgBlocks[index].id }).catch(() => null);
+  }
+}
+
 // ─── Notion helpers ──────────────────────────────────────────────────────────
 async function getNotionProjects(notion: Notion, parentPageId: string) {
   const response = await notion.blocks.children.list({ block_id: parentPageId });
@@ -180,7 +270,60 @@ async function getOrCreateDatabaseForProject(
     return matchingDb.id;
   }
 
-  // 5. Try to create inline inside toggle
+  // 5. Prefer a child page inside the toggle, then place the database inside that page.
+  let childPageId = childPage?.id || null;
+  if (!childPageId) {
+    try {
+      const pageResp = await notion.blocks.children.append({
+        block_id: toggleBlockId,
+        children: [
+          {
+            object: 'block',
+            type: 'child_page',
+            child_page: { title: `Participantes - ${projectTitle}` },
+          } as any,
+        ],
+      });
+      childPageId = (pageResp as any).results?.[0]?.id || null;
+    } catch {}
+  }
+
+  if (childPageId) {
+    const db: any = await notion.databases.create({
+      parent: { type: 'page_id', page_id: childPageId },
+      is_inline: true,
+      title: [{ type: 'text', text: { content: `Participantes - ${projectTitle}` } }],
+      properties: {
+        Nombre: { title: {} },
+        Identificacion: { rich_text: {} },
+        Rol: {
+          select: {
+            options: [
+              { name: 'estudiante', color: 'blue' },
+              { name: 'egresado', color: 'purple' },
+              { name: 'empresario', color: 'orange' },
+            ],
+          },
+        },
+        Correo: { email: {} },
+        Estado: {
+          select: {
+            options: [
+              { name: 'recibido', color: 'yellow' },
+              { name: 'incorrecto', color: 'red' },
+              { name: 'certificado', color: 'green' },
+            ],
+          },
+        },
+        Generado: { date: {} },
+        'Enlace Descarga': { files: {} },
+      },
+    });
+    await ensureDbProperties(notion, db.id);
+    return db.id;
+  }
+
+  // 6. Try to create inline inside toggle
   try {
     const resp = await notion.blocks.children.append({
       block_id: toggleBlockId,
@@ -199,7 +342,7 @@ async function getOrCreateDatabaseForProject(
     }
   } catch {}
 
-  // 6. Fallback: create at parent page level
+  // 7. Fallback: create at parent page level
   const db: any = await notion.databases.create({
     parent: { type: 'page_id', page_id: parentPageId },
     is_inline: true,
@@ -350,41 +493,7 @@ async function saveNotionProjectConfigToNotion(notion: Notion, toggleBlockId: st
     });
   }
 
-  if (config.bgImage) {
-    const existingBgBlock = results.find(
-      (b: any) =>
-        b.type === 'code' &&
-        b.code?.language === 'plaintext' &&
-        (b.code?.caption || []).map((t: any) => t.plain_text).join('').includes('Fondo'),
-    );
-    const bgChunks: any[] = [];
-    for (let i = 0; i < config.bgImage.length; i += 2000) {
-      bgChunks.push({ type: 'text', text: { content: config.bgImage.substring(i, i + 2000) } });
-    }
-    if (existingBgBlock) {
-      await notion.blocks.update({
-        block_id: existingBgBlock.id,
-        code: { rich_text: bgChunks, language: 'plaintext' },
-      });
-    } else {
-      await notion.blocks.children.append({
-        block_id: toggleBlockId,
-        children: [
-          {
-            object: 'block',
-            type: 'code',
-            code: {
-              caption: [
-                { type: 'text', text: { content: 'Imagen de Fondo de Certificado (Base64/URL)' } },
-              ],
-              rich_text: bgChunks,
-              language: 'plaintext',
-            },
-          } as any,
-        ],
-      });
-    }
-  }
+  await saveBgImageBlocksToNotion(notion, toggleBlockId, results, config.bgImage || null);
 }
 
 function parseStatus(raw: string): 'recibido' | 'incorrecto' | 'certificado' {
@@ -466,12 +575,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           try {
             const blks: any[] = (await notion.blocks.children.list({ block_id: proj.id })).results || [];
             const codeBlock = blks.find((b: any) => b.type === 'code' && b.code?.language === 'json');
-            const bgBlock = blks.find(
-              (b: any) =>
-                b.type === 'code' &&
-                b.code?.language === 'plaintext' &&
-                (b.code?.caption || []).map((t: any) => t.plain_text).join('').includes('Fondo'),
-            );
             const quoteBlock = blks.find((b: any) => b.type === 'quote');
             const dailyCode = quoteBlock
               ? (quoteBlock.quote?.rich_text || []).map((t: any) => t.plain_text).join('').trim()
@@ -481,9 +584,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               const txt = (codeBlock.code?.rich_text || []).map((t: any) => t.plain_text).join('');
               if (txt) layout = JSON.parse(txt);
             }
-            const bgImage = bgBlock
-              ? (bgBlock.code?.rich_text || []).map((t: any) => t.plain_text).join('') || null
-              : null;
+            const bgImage = readBgImageFromBlocks(blks);
             return {
               id: proj.id,
               title: proj.title,
