@@ -73,7 +73,7 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
 
   // Refs for smooth drag/resize (no setState during pointermove)
   const fieldElemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const dragRef = useRef<{ fieldId: string; startCX: number; startCY: number; startFX: number; startFY: number; lastX: number; lastY: number } | null>(null);
+  const dragRef = useRef<{ fieldId: string; startCX: number; startCY: number; startFX: number; startFY: number; startFW: number; startFH: number; lastX: number; lastY: number } | null>(null);
   const resizeRef = useRef<{ fieldId: string; handle: 'right' | 'bottom' | 'corner'; startCX: number; startCY: number; startW: number; startH: number; lastW: number; lastH: number } | null>(null);
 
   // Custom fields in settings
@@ -199,12 +199,17 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
       if (dragRef.current) {
         const dx = ((e.clientX - dragRef.current.startCX) / rect.width) * 100;
         const dy = ((e.clientY - dragRef.current.startCY) / rect.height) * 100;
-        const nx = Math.max(0, Math.min(100, dragRef.current.startFX + dx));
-        const ny = Math.max(0, Math.min(100, dragRef.current.startFY + dy));
+        const halfW = dragRef.current.startFW / 2;
+        const halfH = dragRef.current.startFH / 2;
+        const nx = Math.max(halfW, Math.min(100 - halfW, dragRef.current.startFX + dx));
+        const ny = Math.max(halfH, Math.min(100 - halfH, dragRef.current.startFY + dy));
         dragRef.current.lastX = nx;
         dragRef.current.lastY = ny;
         const el = fieldElemRefs.current.get(dragRef.current.fieldId);
-        if (el) { el.style.left = `${nx}%`; el.style.top = `${ny}%`; }
+        if (el) {
+          el.style.left = `${nx - halfW}%`;
+          el.style.top = `${ny - halfH}%`;
+        }
       }
       if (resizeRef.current) {
         const dx = ((e.clientX - resizeRef.current.startCX) / rect.width) * 100;
@@ -1073,7 +1078,17 @@ export default function AdminDashboard({ onBackToRegistry, darkMode, setDarkMode
                             e.preventDefault();
                             e.stopPropagation();
                             setActiveFieldId(field.id);
-                            dragRef.current = { fieldId: field.id, startCX: e.clientX, startCY: e.clientY, startFX: field.x, startFY: field.y, lastX: field.x, lastY: field.y };
+                            dragRef.current = {
+                              fieldId: field.id,
+                              startCX: e.clientX,
+                              startCY: e.clientY,
+                              startFX: field.x,
+                              startFY: field.y,
+                              startFW: field.width,
+                              startFH: field.height,
+                              lastX: field.x,
+                              lastY: field.y,
+                            };
                           }}
                           className={`absolute select-none rounded overflow-hidden cursor-grab active:cursor-grabbing transition-shadow ${
                             isActive

@@ -76,6 +76,7 @@ function json(data: unknown, status = 200) {
 const BG_BLOCK_CAPTION_PREFIX = '__CERT_BG__';
 const BG_TEXT_CHUNK_SIZE = 1800;
 const BG_TEXT_CHUNKS_PER_BLOCK = 80;
+const NOTION_PLAIN_TEXT_LANGUAGE = 'plain text';
 
 function richTextToPlainText(richText: any[] = []) {
   return richText.map((item: any) => item?.plain_text || item?.text?.content || '').join('');
@@ -111,7 +112,9 @@ function getBgBlockIndex(block: any) {
 }
 
 function isBgBlock(block: any) {
-  if (block?.type !== 'code' || block?.code?.language !== 'plaintext') return false;
+  if (block?.type !== 'code') return false;
+  const language = (block?.code?.language || '').toLowerCase();
+  if (language !== 'plaintext' && language !== NOTION_PLAIN_TEXT_LANGUAGE) return false;
   const caption = getBgBlockCaption(block);
   return caption.startsWith(BG_BLOCK_CAPTION_PREFIX) || caption.includes('Imagen de Fondo de Certificado') || caption.includes('Fondo');
 }
@@ -145,7 +148,7 @@ async function saveBgImageBlocksToNotion(notion: Notion, toggleBlockId: string, 
     const code = {
       caption: [{ type: 'text', text: { content: `${BG_BLOCK_CAPTION_PREFIX}:${index + 1}/${groups.length}` } }],
       rich_text: groups[index],
-      language: 'plaintext',
+      language: NOTION_PLAIN_TEXT_LANGUAGE,
     };
 
     if (existingBgBlocks[index]) {
